@@ -28,6 +28,11 @@ PRICING = {
         "output_per_mtok": 25.00,
         "batch_discount": 0.50,
     },
+    "claude-opus-4-8": {
+        "input_per_mtok": 5.00,
+        "output_per_mtok": 25.00,
+        "batch_discount": 0.50,
+    },
     "claude-haiku-4-5": {
         "input_per_mtok": 1.00,
         "output_per_mtok": 5.00,
