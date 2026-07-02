@@ -40,3 +40,10 @@ def test_bad_admin_id_raises(monkeypatch):
     monkeypatch.setenv("BOT_ADMIN_ID", "abc")
     with pytest.raises(RuntimeError):
         load_settings()
+
+
+def test_missing_api_key_is_allowed(monkeypatch):
+    _set_base_env(monkeypatch)
+    monkeypatch.delenv("ANTHROPIC_API_KEY")
+    s = load_settings()
+    assert s.anthropic_api_key == ""

@@ -34,6 +34,8 @@ def load_settings() -> BotSettings:
         if part.strip().isdigit()
     )
 
+    # Ixtiyoriy: kalit bo'lmasa ham bot ishlaydi (Parser rejimi kalitsiz),
+    # AI Resolver handleri ishlatishdan oldin o'zi tekshiradi.
     api_key = os.environ.get("ANTHROPIC_API_KEY", "").strip()
 
     return BotSettings(
