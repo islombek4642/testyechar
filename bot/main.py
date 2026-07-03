@@ -24,8 +24,8 @@ async def main() -> None:
     )
     dp = Dispatcher(bot_settings=settings)  # injected into handlers by param name
 
-    dp.message.middleware(AccessMiddleware(settings))
-    dp.callback_query.middleware(AccessMiddleware(settings))
+    dp.message.outer_middleware(AccessMiddleware(settings))
+    dp.callback_query.outer_middleware(AccessMiddleware(settings))
     dp.include_router(router)
 
     @dp.errors()

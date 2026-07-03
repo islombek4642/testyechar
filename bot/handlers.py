@@ -228,22 +228,28 @@ async def handle_export(cb: CallbackQuery) -> None:
         await cb.answer("Natija topilmadi — yangi fayl yuboring.", show_alert=True)
         return
 
-    if kind == "parser":
-        if fmt == "txt":
-            data = to_classic_txt(cached.questions).encode("utf-8")
-            name = f"{cached.base_name}_questions.txt"
+    try:
+        if kind == "parser":
+            if fmt == "txt":
+                data = to_classic_txt(cached.questions).encode("utf-8")
+                name = f"{cached.base_name}_questions.txt"
+            else:
+                data = JSONExporter().to_docx_bytes(cached.questions)
+                name = f"{cached.base_name}_questions.docx"
         else:
-            data = JSONExporter().to_docx_bytes(cached.questions)
-            name = f"{cached.base_name}_questions.docx"
-    else:
-        if fmt == "txt":
-            data = AIExporter().to_txt_string(cached.merge.questions).encode("utf-8")
-            name = f"{cached.base_name}_resolved.txt"
-        else:
-            name = f"{cached.base_name}_resolved.docx"
-            data = AIDocxExporter().export(cached.merge, name)
+            if fmt == "txt":
+                data = AIExporter().to_txt_string(cached.merge.questions).encode("utf-8")
+                name = f"{cached.base_name}_resolved.txt"
+            else:
+                name = f"{cached.base_name}_resolved.docx"
+                data = AIDocxExporter().export(cached.merge, name)
 
-    await cb.message.answer_document(BufferedInputFile(data, filename=name))
+        await cb.message.answer_document(BufferedInputFile(data, filename=name))
+    except Exception:
+        log.exception("Eksport xatosi")
+        await cb.answer("❌ Eksportda xato yuz berdi.", show_alert=True)
+        return
+
     await cb.answer()
 
 
