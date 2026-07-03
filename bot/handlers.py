@@ -1,0 +1,255 @@
+"""Telegram handlers: /start, mode selection, file processing, TXT/DOCX export."""
+from __future__ import annotations
+
+import asyncio
+import html
+import time
+from dataclasses import dataclass
+from typing import List, Optional
+
+from aiogram import Bot, F, Router
+from aiogram.exceptions import TelegramBadRequest
+from aiogram.filters import CommandStart
+from aiogram.fsm.context import FSMContext
+from aiogram.types import (
+    BufferedInputFile,
+    CallbackQuery,
+    InlineKeyboardButton,
+    InlineKeyboardMarkup,
+    KeyboardButton,
+    Message,
+    ReplyKeyboardMarkup,
+)
+
+from app.ai.docx_exporter import AIDocxExporter
+from app.ai.exporter import AIExporter
+from app.ai.merger import MergeResult
+from app.ai.pipeline import AIResolverPipeline
+from app.config import settings as core_settings
+from app.core.pipeline import ParsingPipeline
+from app.exporter import JSONExporter
+from app.models.question import ParsedQuestion
+from app.parser import FormatType
+from app.utils.logger import get_logger
+
+from bot.classic_txt import to_classic_txt
+from bot.config import BotSettings
+from bot.formatters import format_parser_summary, format_resolver_summary
+from bot.states import Mode
+
+log = get_logger(__name__)
+router = Router()
+
+BTN_PARSER = "📝 Parser"
+BTN_RESOLVER = "🤖 AI Resolver"
+
+MAIN_KB = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text=BTN_PARSER), KeyboardButton(text=BTN_RESOLVER)]],
+    resize_keyboard=True,
+)
+
+PARSER_EXTS = {"pdf", "docx", "doc", "xlsx", "txt"}
+RESOLVER_EXTS = {"txt", "docx"}
+MAX_FILE_BYTES = 20 * 1024 * 1024  # Telegram bot download limit
+
+
+@dataclass
+class CachedResult:
+    kind: str  # "parser" | "resolver"
+    base_name: str  # original filename without extension
+    questions: Optional[List[ParsedQuestion]] = None  # parser
+    merge: Optional[MergeResult] = None  # resolver
+
+
+_results: dict[int, CachedResult] = {}
+
+
+def file_ext(filename: Optional[str]) -> str:
+    if not filename or "." not in filename:
+        return ""
+    return filename.rsplit(".", 1)[-1].lower()
+
+
+def export_keyboard(kind: str) -> InlineKeyboardMarkup:
+    return InlineKeyboardMarkup(
+        inline_keyboard=[[
+            InlineKeyboardButton(text="📄 TXT", callback_data=f"exp:{kind}:txt"),
+            InlineKeyboardButton(text="📖 DOCX", callback_data=f"exp:{kind}:docx"),
+        ]]
+    )
+
+
+# ── /start and mode selection ───────────────────────────────────────────────
+
+@router.message(CommandStart())
+async def cmd_start(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer(
+        "Assalomu alaykum! Rejimni tanlang:\n\n"
+        f"{BTN_PARSER} — test faylini tahlil qilish (PDF, DOCX, DOC, XLSX, TXT)\n"
+        f"{BTN_RESOLVER} — savollarga Claude AI yordamida javob topish (TXT, DOCX)",
+        reply_markup=MAIN_KB,
+    )
+
+
+@router.message(F.text == BTN_PARSER)
+async def choose_parser(message: Message, state: FSMContext) -> None:
+    await state.set_state(Mode.parser_waiting)
+    await message.answer(
+        "📝 Parser rejimi.\nTest faylini yuboring (PDF, DOCX, DOC, XLSX yoki TXT, 20 MB gacha)."
+    )
+
+
+@router.message(F.text == BTN_RESOLVER)
+async def choose_resolver(message: Message, state: FSMContext) -> None:
+    await state.set_state(Mode.resolver_waiting)
+    await message.answer(
+        "🤖 AI Resolver rejimi.\nSavollar faylini yuboring "
+        "(TXT yoki DOCX, klassik `? = +` format, 20 MB gacha)."
+    )
+
+
+# ── Parser flow ─────────────────────────────────────────────────────────────
+
+@router.message(Mode.parser_waiting, F.document)
+async def handle_parser_file(message: Message, state: FSMContext, bot: Bot) -> None:
+    doc = message.document
+    ext = file_ext(doc.file_name)
+    if ext not in PARSER_EXTS:
+        await message.answer(
+            "❌ Bu fayl turi qo'llab-quvvatlanmaydi.\n"
+            "Ruxsat etilgan: PDF, DOCX, DOC, XLSX, TXT."
+        )
+        return
+    if doc.file_size and doc.file_size > MAX_FILE_BYTES:
+        await message.answer("❌ Fayl juda katta (20 MB dan oshmasligi kerak).")
+        return
+
+    status = await message.answer("⏳ Fayl qabul qilindi, tahlil qilinmoqda…")
+    tmp_dir = core_settings.data_dir / "tmp"
+    tmp_dir.mkdir(parents=True, exist_ok=True)
+    path = tmp_dir / f"{message.chat.id}_{doc.file_name}"
+    await bot.download(doc, destination=path)
+
+    try:
+        result = await asyncio.to_thread(ParsingPipeline().run, path, FormatType.AUTO)
+    except Exception as exc:  # pipeline errors must not kill the bot
+        log.exception("Parser pipeline xatosi")
+        await status.edit_text(f"❌ Tahlilda xato: {html.escape(str(exc))}")
+        return
+    finally:
+        path.unlink(missing_ok=True)
+
+    if not result.questions:
+        await status.edit_text(
+            "❌ Faylda savollar topilmadi. Fayl formati to'g'riligini tekshiring."
+        )
+        return
+
+    extra = []
+    if ext == "doc":
+        extra.append(".doc fayl zaxira usulda o'qildi — sifat pastroq bo'lishi mumkin.")
+
+    base = doc.file_name.rsplit(".", 1)[0]
+    _results[message.chat.id] = CachedResult("parser", base, questions=result.questions)
+    await status.edit_text(
+        format_parser_summary(doc.file_name, result, extra_warnings=extra),
+        reply_markup=export_keyboard("parser"),
+    )
+
+
+# ── Resolver flow ───────────────────────────────────────────────────────────
+
+@router.message(Mode.resolver_waiting, F.document)
+async def handle_resolver_file(
+    message: Message, state: FSMContext, bot: Bot, bot_settings: BotSettings
+) -> None:
+    doc = message.document
+    ext = file_ext(doc.file_name)
+    if ext not in RESOLVER_EXTS:
+        await message.answer("❌ Faqat TXT yoki DOCX fayl yuboring.")
+        return
+    if doc.file_size and doc.file_size > MAX_FILE_BYTES:
+        await message.answer("❌ Fayl juda katta (20 MB dan oshmasligi kerak).")
+        return
+    if not bot_settings.anthropic_api_key:
+        await message.answer("❌ Serverda ANTHROPIC_API_KEY sozlanmagan.")
+        return
+
+    buf = await bot.download(doc)  # BytesIO when destination is omitted
+    content = buf.read()
+
+    status = await message.answer("🤖 Savollar Batch API'ga yuborilmoqda…")
+    throttle = {"text": "", "t": 0.0}
+
+    async def progress(msg_text: str, frac: float) -> None:
+        text = f"🤖 {msg_text} ({frac * 100:.0f}%)"
+        now = time.monotonic()
+        if text == throttle["text"] or now - throttle["t"] < 2.0:
+            return
+        throttle["text"], throttle["t"] = text, now
+        try:
+            await status.edit_text(text)
+        except TelegramBadRequest:
+            pass  # same content / message deleted — ignore
+
+    pipeline = AIResolverPipeline(
+        api_key=bot_settings.anthropic_api_key,
+        model=bot_settings.model,
+        use_batch=True,
+    )
+    try:
+        merge, stats = await pipeline.run(content, file_type=ext, progress_callback=progress)
+    except Exception as exc:
+        log.exception("Resolver pipeline xatosi")
+        await status.edit_text(f"❌ AI yechishda xato: {html.escape(str(exc))}")
+        return
+
+    base = doc.file_name.rsplit(".", 1)[0]
+    _results[message.chat.id] = CachedResult("resolver", base, merge=merge)
+    await status.edit_text(
+        format_resolver_summary(doc.file_name, merge, stats),
+        reply_markup=export_keyboard("resolver"),
+    )
+
+
+# ── Export buttons ──────────────────────────────────────────────────────────
+
+@router.callback_query(F.data.startswith("exp:"))
+async def handle_export(cb: CallbackQuery) -> None:
+    _, kind, fmt = cb.data.split(":")
+    cached = _results.get(cb.message.chat.id)
+    if cached is None or cached.kind != kind:
+        await cb.answer("Natija topilmadi — yangi fayl yuboring.", show_alert=True)
+        return
+
+    if kind == "parser":
+        if fmt == "txt":
+            data = to_classic_txt(cached.questions).encode("utf-8")
+            name = f"{cached.base_name}_questions.txt"
+        else:
+            data = JSONExporter().to_docx_bytes(cached.questions)
+            name = f"{cached.base_name}_questions.docx"
+    else:
+        if fmt == "txt":
+            data = AIExporter().to_txt_string(cached.merge.questions).encode("utf-8")
+            name = f"{cached.base_name}_resolved.txt"
+        else:
+            name = f"{cached.base_name}_resolved.docx"
+            data = AIDocxExporter().export(cached.merge, name)
+
+    await cb.message.answer_document(BufferedInputFile(data, filename=name))
+    await cb.answer()
+
+
+# ── Fallbacks ───────────────────────────────────────────────────────────────
+
+@router.message(Mode.parser_waiting)
+@router.message(Mode.resolver_waiting)
+async def waiting_but_not_document(message: Message) -> None:
+    await message.answer("📎 Iltimos, fayl (hujjat) sifatida yuboring.")
+
+
+@router.message()
+async def no_mode_selected(message: Message) -> None:
+    await message.answer("Avval rejimni tanlang: 📝 Parser yoki 🤖 AI Resolver.", reply_markup=MAIN_KB)
