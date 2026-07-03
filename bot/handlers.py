@@ -183,11 +183,19 @@ async def handle_resolver_file(
 
     status = await message.answer("🤖 Savollar Batch API'ga yuborilmoqda…")
     throttle = {"text": "", "t": 0.0}
+    started = time.monotonic()
 
     async def progress(msg_text: str, frac: float) -> None:
-        text = f"🤖 {msg_text} ({frac * 100:.0f}%)"
+        # O'tgan vaqt qatori har pollda o'zgaradi — foydalanuvchi bot
+        # tirikligini ko'radi (Batch API hisoblagichlari oxirigacha 0 bo'lib turadi).
+        elapsed = int(time.monotonic() - started)
+        text = (
+            f"🤖 {msg_text} ({frac * 100:.0f}%)\n"
+            f"⏱ O'tgan vaqt: {elapsed // 60:02d}:{elapsed % 60:02d} — "
+            f"Batch odatda 15-30 daqiqada tugaydi, kuting…"
+        )
         now = time.monotonic()
-        if text == throttle["text"] or now - throttle["t"] < 2.0:
+        if text == throttle["text"] or now - throttle["t"] < 8.0:
             return
         throttle["text"], throttle["t"] = text, now
         try:

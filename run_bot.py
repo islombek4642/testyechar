@@ -14,6 +14,10 @@ from app.config import settings
 
 settings.ensure_dirs()
 
+from app.utils.logger import setup_logging
+
+setup_logging(log_level="INFO", log_file=settings.logs_dir / "bot.log")
+
 from bot.main import main
 
 if __name__ == "__main__":
