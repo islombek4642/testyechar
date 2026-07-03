@@ -4,6 +4,7 @@ from __future__ import annotations
 import asyncio
 import html
 import time
+from uuid import uuid4
 from dataclasses import dataclass
 from typing import List, Optional
 
@@ -128,12 +129,13 @@ async def handle_parser_file(message: Message, state: FSMContext, bot: Bot) -> N
     status = await message.answer("⏳ Fayl qabul qilindi, tahlil qilinmoqda…")
     tmp_dir = core_settings.data_dir / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
-    path = tmp_dir / f"{message.chat.id}_{doc.file_name}"
-    await bot.download(doc, destination=path)
-
+    # doc.file_name tashqaridan keladi — yo'l sifatida ishlatilmaydi,
+    # faqat tekshirilgan kengaytma + tasodifiy nom bilan saqlanadi.
+    path = tmp_dir / f"{message.chat.id}_{uuid4().hex}.{ext}"
     try:
+        await bot.download(doc, destination=path)
         result = await asyncio.to_thread(ParsingPipeline().run, path, FormatType.AUTO)
-    except Exception as exc:  # pipeline errors must not kill the bot
+    except Exception as exc:  # yuklab olish/pipeline xatosi botni yiqitmasligi kerak
         log.exception("Parser pipeline xatosi")
         await status.edit_text(f"❌ Tahlilda xato: {html.escape(str(exc))}")
         return
@@ -218,6 +220,9 @@ async def handle_resolver_file(
 @router.callback_query(F.data.startswith("exp:"))
 async def handle_export(cb: CallbackQuery) -> None:
     _, kind, fmt = cb.data.split(":")
+    if cb.message is None:
+        await cb.answer("Xabar eskirgan — yangi fayl yuboring.", show_alert=True)
+        return
     cached = _results.get(cb.message.chat.id)
     if cached is None or cached.kind != kind:
         await cb.answer("Natija topilmadi — yangi fayl yuboring.", show_alert=True)
