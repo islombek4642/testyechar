@@ -33,6 +33,7 @@ from app.models.question import ParsedQuestion
 from app.parser import FormatType
 from app.utils.logger import get_logger
 
+from bot.allowed_users import AllowedUsersStore
 from bot.classic_txt import to_classic_txt
 from bot.config import BotSettings
 from bot.formatters import format_parser_summary, format_resolver_summary
@@ -45,6 +46,7 @@ BTN_PARSER = "📝 Parser"
 BTN_RESOLVER = "🤖 AI Resolver"
 BTN_CANCEL = "❌ Bekor qilish"
 BTN_SETTINGS = "⚙️ Sozlamalar"
+BTN_MANAGE_USERS = "👥 Foydalanuvchilar"
 
 MAIN_KB = ReplyKeyboardMarkup(
     keyboard=[
@@ -70,12 +72,17 @@ MODEL_OPTIONS = {
     "claude-sonnet-5": "Claude Sonnet 5",
 }
 
-MODEL_KB = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text=label)] for label in MODEL_OPTIONS.values()],
-    resize_keyboard=True,
-)
-
 _LABEL_TO_MODEL = {label: model_id for model_id, label in MODEL_OPTIONS.items()}
+
+
+def settings_keyboard(selected_model: str, is_admin: bool) -> ReplyKeyboardMarkup:
+    rows = []
+    for model_id, label in MODEL_OPTIONS.items():
+        text = f"✅ {label}" if model_id == selected_model else label
+        rows.append([KeyboardButton(text=text)])
+    if is_admin:
+        rows.append([KeyboardButton(text=BTN_MANAGE_USERS)])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
 @dataclass
@@ -123,6 +130,27 @@ def settings_text(selected: str) -> str:
         f"AI Resolver uchun model — joriy: <b>{label}</b>\n"
         "Quyidagilardan birini tanlang:"
     )
+
+
+def manage_users_text(ids: List[int]) -> str:
+    if ids:
+        body = "\n".join(f"🆔 <code>{uid}</code>" for uid in ids)
+    else:
+        body = "Hozircha qo'shimcha ruxsat etilgan foydalanuvchi yo'q."
+    return (
+        "👥 <b>Ruxsat etilgan foydalanuvchilar</b>\n\n"
+        f"{body}\n\n"
+        "(admin doim ruxsatli, ro'yxatga kiritilmaydi)"
+    )
+
+
+def manage_users_keyboard(ids: List[int]) -> InlineKeyboardMarkup:
+    rows = [
+        [InlineKeyboardButton(text=f"❌ {uid}", callback_data=f"deluser:{uid}")] for uid in ids
+    ]
+    rows.append([InlineKeyboardButton(text="➕ Yangi qo'shish", callback_data="adduser:prompt")])
+    rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="users:back")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 async def send_status_and_restore_menu(message: Message, status_text: str) -> Message:
@@ -177,6 +205,7 @@ async def choose_resolver(message: Message, state: FSMContext) -> None:
 
 @router.message(Mode.parser_waiting, F.text == BTN_CANCEL)
 @router.message(Mode.resolver_waiting, F.text == BTN_CANCEL)
+@router.message(Mode.adding_user, F.text == BTN_CANCEL)
 async def cancel_waiting(message: Message, state: FSMContext) -> None:
     await state.clear()
     await message.answer("❌ Bekor qilindi.", reply_markup=MAIN_KB)
@@ -186,15 +215,40 @@ async def cancel_waiting(message: Message, state: FSMContext) -> None:
 async def show_settings(message: Message, state: FSMContext, bot_settings: BotSettings) -> None:
     await state.set_state(Mode.choosing_model)
     selected = get_selected_model(message.chat.id, bot_settings.model)
-    sent = await message.answer(settings_text(selected), reply_markup=MODEL_KB)
+    is_admin = message.from_user.id == bot_settings.admin_id
+    sent = await message.answer(
+        settings_text(selected), reply_markup=settings_keyboard(selected, is_admin)
+    )
     _settings_msg_id[message.chat.id] = sent.message_id
 
 
+@router.message(Mode.choosing_model, F.text == BTN_MANAGE_USERS)
+async def show_manage_users(
+    message: Message,
+    state: FSMContext,
+    bot_settings: BotSettings,
+    allowed_users: AllowedUsersStore,
+) -> None:
+    if message.from_user.id != bot_settings.admin_id:
+        await state.clear()
+        await message.answer("⛔ Bu bo'lim faqat admin uchun.", reply_markup=MAIN_KB)
+        return
+    await state.set_state(Mode.managing_users)
+    ids = allowed_users.list_ids()
+    await message.answer(manage_users_text(ids), reply_markup=manage_users_keyboard(ids))
+
+
 @router.message(Mode.choosing_model)
-async def handle_model_choice(message: Message, state: FSMContext, bot: Bot) -> None:
-    model_id = _LABEL_TO_MODEL.get(message.text)
+async def handle_model_choice(message: Message, state: FSMContext, bot: Bot, bot_settings: BotSettings) -> None:
+    text = (message.text or "").removeprefix("✅ ")
+    model_id = _LABEL_TO_MODEL.get(text)
     if model_id is None:
-        await message.answer("Iltimos, quyidagi tugmalardan birini tanlang.", reply_markup=MODEL_KB)
+        selected = get_selected_model(message.chat.id, bot_settings.model)
+        is_admin = message.from_user.id == bot_settings.admin_id
+        await message.answer(
+            "Iltimos, quyidagi tugmalardan birini tanlang.",
+            reply_markup=settings_keyboard(selected, is_admin),
+        )
         return
 
     _user_model[message.chat.id] = model_id
@@ -212,6 +266,82 @@ async def handle_model_choice(message: Message, state: FSMContext, bot: Bot) -> 
             pass  # eski xabar tahrirlanmadi — foydalanuvchiga baribir tasdiq ko'rinadi
 
     await message.answer("🏠 Bosh menyu", reply_markup=MAIN_KB)
+
+
+# ── Foydalanuvchilarni boshqarish (faqat admin) ─────────────────────────────
+
+@router.callback_query(F.data == "adduser:prompt")
+async def prompt_add_user(cb: CallbackQuery, state: FSMContext, bot_settings: BotSettings) -> None:
+    if cb.from_user.id != bot_settings.admin_id:
+        await cb.answer("⛔ Ruxsat yo'q.", show_alert=True)
+        return
+    if cb.message is None:
+        await cb.answer("Xabar eskirgan.", show_alert=True)
+        return
+    await state.set_state(Mode.adding_user)
+    await cb.message.answer(
+        "Yangi foydalanuvchining Telegram ID raqamini yuboring "
+        "(masalan, @userinfobot orqali oling):",
+        reply_markup=CANCEL_KB,
+    )
+    await cb.answer()
+
+
+@router.message(Mode.adding_user)
+async def handle_add_user_text(
+    message: Message, state: FSMContext, allowed_users: AllowedUsersStore
+) -> None:
+    text = (message.text or "").strip()
+    if not text.isdigit():
+        await message.answer(
+            "❌ Iltimos, faqat raqamlardan iborat Telegram ID yuboring.", reply_markup=CANCEL_KB
+        )
+        return
+
+    user_id = int(text)
+    added = allowed_users.add(user_id)
+    await state.clear()
+    if added:
+        await message.answer(
+            f"✅ {user_id} ruxsat etilganlar ro'yxatiga qo'shildi.", reply_markup=MAIN_KB
+        )
+    else:
+        await message.answer(
+            f"ℹ️ {user_id} allaqachon ruxsat etilgan (yoki u admin).", reply_markup=MAIN_KB
+        )
+
+
+@router.callback_query(F.data.startswith("deluser:"))
+async def handle_remove_user(
+    cb: CallbackQuery, bot_settings: BotSettings, allowed_users: AllowedUsersStore
+) -> None:
+    if cb.from_user.id != bot_settings.admin_id:
+        await cb.answer("⛔ Ruxsat yo'q.", show_alert=True)
+        return
+    if cb.message is None:
+        await cb.answer("Xabar eskirgan.", show_alert=True)
+        return
+    try:
+        user_id = int(cb.data.split(":", 1)[1])
+    except ValueError:
+        await cb.answer("Noto'g'ri so'rov.", show_alert=True)
+        return
+
+    allowed_users.remove(user_id)
+    ids = allowed_users.list_ids()
+    try:
+        await cb.message.edit_text(manage_users_text(ids), reply_markup=manage_users_keyboard(ids))
+    except TelegramBadRequest:
+        pass
+    await cb.answer(f"✅ {user_id} o'chirildi")
+
+
+@router.callback_query(F.data == "users:back")
+async def handle_users_back(cb: CallbackQuery, state: FSMContext) -> None:
+    await state.clear()
+    if cb.message is not None:
+        await send_status_and_restore_menu(cb.message, "🏠 Bosh menyu")
+    await cb.answer()
 
 
 # ── Parser flow ─────────────────────────────────────────────────────────────

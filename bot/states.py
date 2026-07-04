@@ -6,3 +6,5 @@ class Mode(StatesGroup):
     parser_waiting = State()
     resolver_waiting = State()
     choosing_model = State()
+    managing_users = State()
+    adding_user = State()
