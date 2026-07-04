@@ -295,8 +295,14 @@ async def handle_resolver_file(
         throttle["text"], throttle["t"] = text, now
         try:
             await status.edit_text(text)
-        except TelegramBadRequest:
-            pass  # same content / message deleted — ignore
+        except Exception:
+            # Progress xabarini yangilash shunchaki kosmetik amal — tarmoq
+            # uzilishi yoki Telegram xatosi tufayli bu yerda muvaffaqiyatsiz
+            # bo'lish asosiy Batch kutish jarayonini (poll_until_complete)
+            # to'xtatib qo'ymasligi kerak. Keng Exception ushlanadi, chunki
+            # aynan shu sabab (tarmoq uzilishi TelegramBadRequest bo'lmagani
+            # uchun) ilgari butun resolver ishini bekor qilib qo'ygan edi.
+            log.warning("Progress xabarini yangilab bo'lmadi, davom etilmoqda", exc_info=True)
 
     selected_model = get_selected_model(message.chat.id, bot_settings.model)
     pipeline = AIResolverPipeline(
