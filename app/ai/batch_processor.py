@@ -54,6 +54,12 @@ class ClaudeBatchProcessor:
             }
             if "claude-3" in self.model.lower():
                 params["temperature"] = 0.0
+            else:
+                # Fikrlash (thinking) o'chiriladi: bu vazifa oddiy JSON qaytarish,
+                # fikrlashdan foyda yo'q, lekin ba'zi modellar (masalan Sonnet 5)
+                # uni standart yoqib qo'yadi va u max_tokens byudjetini
+                # (shu bilan haqiqiy javobni kesib qo'yishi mumkin) yeb qo'yadi.
+                params["thinking"] = {"type": "disabled"}
 
             requests.append({
                 "custom_id": f"chunk-{chunk_idx}",
