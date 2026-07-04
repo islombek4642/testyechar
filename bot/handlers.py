@@ -154,20 +154,19 @@ def manage_users_keyboard(ids: List[int]) -> InlineKeyboardMarkup:
 
 
 async def send_status_and_restore_menu(message: Message, status_text: str) -> Message:
-    """Send *status_text* and restore MAIN_KB, without leaving two visible bubbles.
+    """Restore MAIN_KB immediately, then send the freely-editable status message.
 
     Telegram never lets you edit a message that was sent with a
     ReplyKeyboardMarkup, so the keyboard-restoring message can't be the
-    same one we keep editing for progress/results. Instead, send a
-    throwaway carrier message with the keyboard attached and delete it
-    immediately — the keyboard change survives the deletion — then send
-    the real (freely editable) status message.
+    same one we keep editing for progress/results — it has to be a
+    separate message. An earlier version tried to hide that extra
+    message by deleting it immediately after sending, but deleting a
+    message right after it sets a new reply keyboard is not reliable —
+    on some clients the keyboard change itself gets lost. Send it
+    without deleting: one extra short-lived-looking line in the chat,
+    but the keyboard reliably comes back.
     """
-    carrier = await message.answer("📥", reply_markup=MAIN_KB)
-    try:
-        await carrier.delete()
-    except TelegramBadRequest:
-        pass  # xabarni o'chirib bo'lmadi — muhim emas, faqat vizual ortiqcha xabar qoladi
+    await message.answer("📥 Fayl qabul qilindi.", reply_markup=MAIN_KB)
     return await message.answer(status_text)
 
 

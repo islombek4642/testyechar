@@ -48,7 +48,7 @@ class _FakeMessage:
         return sent
 
 
-def test_send_status_and_restore_menu_deletes_carrier_and_returns_status():
+def test_send_status_and_restore_menu_keeps_carrier_and_returns_status():
     message = _FakeMessage()
 
     status = asyncio.run(send_status_and_restore_menu(message, "⏳ Tahlil qilinmoqda…"))
@@ -56,7 +56,7 @@ def test_send_status_and_restore_menu_deletes_carrier_and_returns_status():
     assert len(message.answers) == 2
     carrier, returned_status = message.answers
     assert carrier.reply_markup is MAIN_KB
-    assert carrier.deleted is True
+    assert carrier.deleted is False  # endi o'chirilmaydi — ishonchlilik uchun
     assert returned_status is status
     assert status.text == "⏳ Tahlil qilinmoqda…"
     assert status.reply_markup is None
