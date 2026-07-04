@@ -212,7 +212,7 @@ async def handle_parser_file(message: Message, state: FSMContext, bot: Bot) -> N
         await message.answer("❌ Fayl juda katta (20 MB dan oshmasligi kerak).")
         return
 
-    status = await message.answer("⏳ Fayl qabul qilindi, tahlil qilinmoqda…")
+    status = await message.answer("⏳ Fayl qabul qilindi, tahlil qilinmoqda…", reply_markup=MAIN_KB)
     tmp_dir = core_settings.data_dir / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     # doc.file_name tashqaridan keladi — yo'l sifatida ishlatilmaydi,
@@ -267,7 +267,7 @@ async def handle_resolver_file(
     buf = await bot.download(doc)  # BytesIO when destination is omitted
     content = buf.read()
 
-    status = await message.answer("🤖 Savollar Batch API'ga yuborilmoqda…")
+    status = await message.answer("🤖 Savollar Batch API'ga yuborilmoqda…", reply_markup=MAIN_KB)
     throttle = {"text": "", "t": 0.0}
     started = time.monotonic()
 
