@@ -4,7 +4,7 @@ from __future__ import annotations
 from aiogram import Bot, Dispatcher
 from aiogram.client.default import DefaultBotProperties
 from aiogram.enums import ParseMode
-from aiogram.types import ErrorEvent
+from aiogram.types import BotCommand, ErrorEvent
 
 from app.utils.logger import get_logger
 
@@ -21,6 +21,9 @@ async def main() -> None:
     bot = Bot(
         token=settings.bot_token,
         default=DefaultBotProperties(parse_mode=ParseMode.HTML),
+    )
+    await bot.set_my_commands(
+        [BotCommand(command="start", description="Botni ishga tushirish / bosh menyu")]
     )
     dp = Dispatcher(bot_settings=settings)  # injected into handlers by param name
 

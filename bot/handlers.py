@@ -43,9 +43,15 @@ router = Router()
 
 BTN_PARSER = "📝 Parser"
 BTN_RESOLVER = "🤖 AI Resolver"
+BTN_CANCEL = "❌ Bekor qilish"
 
 MAIN_KB = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text=BTN_PARSER), KeyboardButton(text=BTN_RESOLVER)]],
+    resize_keyboard=True,
+)
+
+CANCEL_KB = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text=BTN_CANCEL)]],
     resize_keyboard=True,
 )
 
@@ -97,7 +103,8 @@ async def cmd_start(message: Message, state: FSMContext) -> None:
 async def choose_parser(message: Message, state: FSMContext) -> None:
     await state.set_state(Mode.parser_waiting)
     await message.answer(
-        "📝 Parser rejimi.\nTest faylini yuboring (PDF, DOCX, DOC, XLSX yoki TXT, 20 MB gacha)."
+        "📝 Parser rejimi.\nTest faylini yuboring (PDF, DOCX, DOC, XLSX yoki TXT, 20 MB gacha).",
+        reply_markup=CANCEL_KB,
     )
 
 
@@ -106,8 +113,16 @@ async def choose_resolver(message: Message, state: FSMContext) -> None:
     await state.set_state(Mode.resolver_waiting)
     await message.answer(
         "🤖 AI Resolver rejimi.\nSavollar faylini yuboring "
-        "(TXT yoki DOCX, klassik `? = +` format, 20 MB gacha)."
+        "(TXT yoki DOCX, klassik `? = +` format, 20 MB gacha).",
+        reply_markup=CANCEL_KB,
     )
+
+
+@router.message(Mode.parser_waiting, F.text == BTN_CANCEL)
+@router.message(Mode.resolver_waiting, F.text == BTN_CANCEL)
+async def cancel_waiting(message: Message, state: FSMContext) -> None:
+    await state.clear()
+    await message.answer("❌ Bekor qilindi.", reply_markup=MAIN_KB)
 
 
 # ── Parser flow ─────────────────────────────────────────────────────────────
