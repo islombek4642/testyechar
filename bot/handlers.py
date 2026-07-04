@@ -125,6 +125,24 @@ def settings_text(selected: str) -> str:
     )
 
 
+async def send_status_and_restore_menu(message: Message, status_text: str) -> Message:
+    """Send *status_text* and restore MAIN_KB, without leaving two visible bubbles.
+
+    Telegram never lets you edit a message that was sent with a
+    ReplyKeyboardMarkup, so the keyboard-restoring message can't be the
+    same one we keep editing for progress/results. Instead, send a
+    throwaway carrier message with the keyboard attached and delete it
+    immediately — the keyboard change survives the deletion — then send
+    the real (freely editable) status message.
+    """
+    carrier = await message.answer("📥", reply_markup=MAIN_KB)
+    try:
+        await carrier.delete()
+    except TelegramBadRequest:
+        pass  # xabarni o'chirib bo'lmadi — muhim emas, faqat vizual ortiqcha xabar qoladi
+    return await message.answer(status_text)
+
+
 # ── /start and mode selection ───────────────────────────────────────────────
 
 @router.message(CommandStart())
@@ -212,12 +230,7 @@ async def handle_parser_file(message: Message, state: FSMContext, bot: Bot) -> N
         await message.answer("❌ Fayl juda katta (20 MB dan oshmasligi kerak).")
         return
 
-    # Klaviaturani darhol qaytarish uchun alohida xabar — Telegram xabarni
-    # ReplyKeyboardMarkup bilan yuborilsa, uni keyin tahrirlab bo'lmaydi,
-    # shuning uchun bir xil xabarga ham klaviatura, ham keyingi tahrirlarni
-    # birlashtirib bo'lmaydi.
-    await message.answer("📥 Fayl qabul qilindi.", reply_markup=MAIN_KB)
-    status = await message.answer("⏳ Tahlil qilinmoqda…")
+    status = await send_status_and_restore_menu(message, "⏳ Tahlil qilinmoqda…")
     tmp_dir = core_settings.data_dir / "tmp"
     tmp_dir.mkdir(parents=True, exist_ok=True)
     # doc.file_name tashqaridan keladi — yo'l sifatida ishlatilmaydi,
@@ -272,11 +285,7 @@ async def handle_resolver_file(
     buf = await bot.download(doc)  # BytesIO when destination is omitted
     content = buf.read()
 
-    # Klaviaturani darhol qaytarish uchun alohida xabar — sabab yuqoridagi
-    # handle_parser_file'dagi izohda tushuntirilgan (ReplyKeyboardMarkup
-    # bilan yuborilgan xabarni keyin tahrirlab bo'lmaydi).
-    await message.answer("📥 Fayl qabul qilindi.", reply_markup=MAIN_KB)
-    status = await message.answer("🤖 Savollar Batch API'ga yuborilmoqda…")
+    status = await send_status_and_restore_menu(message, "🤖 Savollar Batch API'ga yuborilmoqda…")
     throttle = {"text": "", "t": 0.0}
     started = time.monotonic()
 

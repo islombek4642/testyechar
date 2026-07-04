@@ -1,4 +1,13 @@
-from bot.handlers import file_ext, export_keyboard, PARSER_EXTS, RESOLVER_EXTS
+import asyncio
+
+from bot.handlers import (
+    MAIN_KB,
+    file_ext,
+    export_keyboard,
+    send_status_and_restore_menu,
+    PARSER_EXTS,
+    RESOLVER_EXTS,
+)
 
 
 def test_file_ext():
@@ -17,3 +26,37 @@ def test_export_keyboard_callback_data():
     kb = export_keyboard("parser")
     buttons = kb.inline_keyboard[0]
     assert [b.callback_data for b in buttons] == ["exp:parser:txt", "exp:parser:docx"]
+
+
+class _FakeSentMessage:
+    def __init__(self, text, reply_markup=None):
+        self.text = text
+        self.reply_markup = reply_markup
+        self.deleted = False
+
+    async def delete(self):
+        self.deleted = True
+
+
+class _FakeMessage:
+    def __init__(self):
+        self.answers = []
+
+    async def answer(self, text, **kwargs):
+        sent = _FakeSentMessage(text, kwargs.get("reply_markup"))
+        self.answers.append(sent)
+        return sent
+
+
+def test_send_status_and_restore_menu_deletes_carrier_and_returns_status():
+    message = _FakeMessage()
+
+    status = asyncio.run(send_status_and_restore_menu(message, "⏳ Tahlil qilinmoqda…"))
+
+    assert len(message.answers) == 2
+    carrier, returned_status = message.answers
+    assert carrier.reply_markup is MAIN_KB
+    assert carrier.deleted is True
+    assert returned_status is status
+    assert status.text == "⏳ Tahlil qilinmoqda…"
+    assert status.reply_markup is None
