@@ -70,6 +70,13 @@ MODEL_OPTIONS = {
     "claude-sonnet-5": "Claude Sonnet 5",
 }
 
+MODEL_KB = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text=label)] for label in MODEL_OPTIONS.values()],
+    resize_keyboard=True,
+)
+
+_LABEL_TO_MODEL = {label: model_id for model_id, label in MODEL_OPTIONS.items()}
+
 
 @dataclass
 class CachedResult:
@@ -84,6 +91,10 @@ _results: dict[int, CachedResult] = {}
 # Har bir chat uchun tanlangan AI Resolver modeli (tanlanmagan bo'lsa
 # bot_settings.model standart qiymat sifatida ishlatiladi).
 _user_model: dict[int, str] = {}
+
+# Sozlamalar xabarining message_id'si — model tanlanganda shu xabarni
+# tahrirlab, tanlov tasdiqlanganini ko'rsatish uchun.
+_settings_msg_id: dict[int, int] = {}
 
 
 def file_ext(filename: Optional[str]) -> str:
@@ -103,14 +114,6 @@ def export_keyboard(kind: str) -> InlineKeyboardMarkup:
 
 def get_selected_model(chat_id: int, default: str) -> str:
     return _user_model.get(chat_id, default)
-
-
-def model_settings_keyboard(selected: str) -> InlineKeyboardMarkup:
-    rows = []
-    for model_id, label in MODEL_OPTIONS.items():
-        text = f"✅ {label}" if model_id == selected else label
-        rows.append([InlineKeyboardButton(text=text, callback_data=f"model:{model_id}")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def settings_text(selected: str) -> str:
@@ -162,28 +165,35 @@ async def cancel_waiting(message: Message, state: FSMContext) -> None:
 
 
 @router.message(F.text == BTN_SETTINGS)
-async def show_settings(message: Message, bot_settings: BotSettings) -> None:
+async def show_settings(message: Message, state: FSMContext, bot_settings: BotSettings) -> None:
+    await state.set_state(Mode.choosing_model)
     selected = get_selected_model(message.chat.id, bot_settings.model)
-    await message.answer(settings_text(selected), reply_markup=model_settings_keyboard(selected))
+    sent = await message.answer(settings_text(selected), reply_markup=MODEL_KB)
+    _settings_msg_id[message.chat.id] = sent.message_id
 
 
-@router.callback_query(F.data.startswith("model:"))
-async def handle_model_choice(cb: CallbackQuery) -> None:
-    if cb.message is None:
-        await cb.answer("Xabar eskirgan.", show_alert=True)
+@router.message(Mode.choosing_model)
+async def handle_model_choice(message: Message, state: FSMContext, bot: Bot) -> None:
+    model_id = _LABEL_TO_MODEL.get(message.text)
+    if model_id is None:
+        await message.answer("Iltimos, quyidagi tugmalardan birini tanlang.", reply_markup=MODEL_KB)
         return
-    _, model_id = cb.data.split(":", 1)
-    if model_id not in MODEL_OPTIONS:
-        await cb.answer("Noma'lum model.", show_alert=True)
-        return
-    _user_model[cb.message.chat.id] = model_id
-    try:
-        await cb.message.edit_text(
-            settings_text(model_id), reply_markup=model_settings_keyboard(model_id)
-        )
-    except TelegramBadRequest:
-        pass  # xuddi shu model qayta bosilgan — matn o'zgarmagan
-    await cb.answer(f"✅ {MODEL_OPTIONS[model_id]} tanlandi")
+
+    _user_model[message.chat.id] = model_id
+    await state.clear()
+
+    msg_id = _settings_msg_id.pop(message.chat.id, None)
+    if msg_id is not None:
+        try:
+            await bot.edit_message_text(
+                chat_id=message.chat.id,
+                message_id=msg_id,
+                text=f"✅ Model tanlandi: <b>{MODEL_OPTIONS[model_id]}</b>",
+            )
+        except TelegramBadRequest:
+            pass  # eski xabar tahrirlanmadi — foydalanuvchiga baribir tasdiq ko'rinadi
+
+    await message.answer("🏠 Bosh menyu", reply_markup=MAIN_KB)
 
 
 # ── Parser flow ─────────────────────────────────────────────────────────────
