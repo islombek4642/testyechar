@@ -340,7 +340,12 @@ async def handle_remove_user(
 async def handle_users_back(cb: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     if cb.message is not None:
-        await send_status_and_restore_menu(cb.message, "🏠 Bosh menyu")
+        # Bu xabarni keyin tahrirlash shart emas, shuning uchun
+        # send_status_and_restore_menu'dagi tashuvchi-xabar-yuborib-o'chirish
+        # hiylasi kerak emas — to'g'ridan-to'g'ri MAIN_KB bilan yuboriladi
+        # (ba'zi Telegram klientlarida xabarni zudlik bilan o'chirish
+        # klaviatura o'zgarishini ba'zan bekor qilib qo'yishi mumkin edi).
+        await cb.message.answer("🏠 Bosh menyu", reply_markup=MAIN_KB)
     await cb.answer()
 
 

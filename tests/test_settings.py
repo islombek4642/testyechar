@@ -297,9 +297,13 @@ def test_handle_remove_user_removes_and_edits_list(tmp_path):
 
 
 def test_handle_users_back_clears_state_and_restores_main_menu():
+    from bot import handlers
+
     message = FakeMessage(chat_id=444, user_id=1)
     cb = FakeCallback(data="users:back", message=message, user_id=1)
     state = FakeState()
     asyncio.run(handle_users_back(cb, state))
     assert state.cleared
-    assert any(markup is not None for _, markup in message.answers)
+    assert len(message.answers) == 1
+    text, markup = message.answers[0]
+    assert markup is handlers.MAIN_KB
