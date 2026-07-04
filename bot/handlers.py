@@ -44,9 +44,13 @@ router = Router()
 BTN_PARSER = "📝 Parser"
 BTN_RESOLVER = "🤖 AI Resolver"
 BTN_CANCEL = "❌ Bekor qilish"
+BTN_SETTINGS = "⚙️ Sozlamalar"
 
 MAIN_KB = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text=BTN_PARSER), KeyboardButton(text=BTN_RESOLVER)]],
+    keyboard=[
+        [KeyboardButton(text=BTN_PARSER), KeyboardButton(text=BTN_RESOLVER)],
+        [KeyboardButton(text=BTN_SETTINGS)],
+    ],
     resize_keyboard=True,
 )
 
@@ -59,6 +63,13 @@ PARSER_EXTS = {"pdf", "docx", "doc", "xlsx", "txt"}
 RESOLVER_EXTS = {"txt", "docx"}
 MAX_FILE_BYTES = 20 * 1024 * 1024  # Telegram bot download limit
 
+# AI Resolver uchun tanlash mumkin bo'lgan modellar (ko'rsatiladigan tartibda).
+MODEL_OPTIONS = {
+    "claude-opus-4-8": "Claude Opus 4.8",
+    "claude-opus-4-7": "Claude Opus 4.7",
+    "claude-sonnet-5": "Claude Sonnet 5",
+}
+
 
 @dataclass
 class CachedResult:
@@ -69,6 +80,10 @@ class CachedResult:
 
 
 _results: dict[int, CachedResult] = {}
+
+# Har bir chat uchun tanlangan AI Resolver modeli (tanlanmagan bo'lsa
+# bot_settings.model standart qiymat sifatida ishlatiladi).
+_user_model: dict[int, str] = {}
 
 
 def file_ext(filename: Optional[str]) -> str:
@@ -83,6 +98,27 @@ def export_keyboard(kind: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📄 TXT", callback_data=f"exp:{kind}:txt"),
             InlineKeyboardButton(text="📖 DOCX", callback_data=f"exp:{kind}:docx"),
         ]]
+    )
+
+
+def get_selected_model(chat_id: int, default: str) -> str:
+    return _user_model.get(chat_id, default)
+
+
+def model_settings_keyboard(selected: str) -> InlineKeyboardMarkup:
+    rows = []
+    for model_id, label in MODEL_OPTIONS.items():
+        text = f"✅ {label}" if model_id == selected else label
+        rows.append([InlineKeyboardButton(text=text, callback_data=f"model:{model_id}")])
+    return InlineKeyboardMarkup(inline_keyboard=rows)
+
+
+def settings_text(selected: str) -> str:
+    label = MODEL_OPTIONS.get(selected, selected)
+    return (
+        "⚙️ <b>Sozlamalar</b>\n\n"
+        f"AI Resolver uchun model — joriy: <b>{label}</b>\n"
+        "Quyidagilardan birini tanlang:"
     )
 
 
@@ -123,6 +159,31 @@ async def choose_resolver(message: Message, state: FSMContext) -> None:
 async def cancel_waiting(message: Message, state: FSMContext) -> None:
     await state.clear()
     await message.answer("❌ Bekor qilindi.", reply_markup=MAIN_KB)
+
+
+@router.message(F.text == BTN_SETTINGS)
+async def show_settings(message: Message, bot_settings: BotSettings) -> None:
+    selected = get_selected_model(message.chat.id, bot_settings.model)
+    await message.answer(settings_text(selected), reply_markup=model_settings_keyboard(selected))
+
+
+@router.callback_query(F.data.startswith("model:"))
+async def handle_model_choice(cb: CallbackQuery) -> None:
+    if cb.message is None:
+        await cb.answer("Xabar eskirgan.", show_alert=True)
+        return
+    _, model_id = cb.data.split(":", 1)
+    if model_id not in MODEL_OPTIONS:
+        await cb.answer("Noma'lum model.", show_alert=True)
+        return
+    _user_model[cb.message.chat.id] = model_id
+    try:
+        await cb.message.edit_text(
+            settings_text(model_id), reply_markup=model_settings_keyboard(model_id)
+        )
+    except TelegramBadRequest:
+        pass  # xuddi shu model qayta bosilgan — matn o'zgarmagan
+    await cb.answer(f"✅ {MODEL_OPTIONS[model_id]} tanlandi")
 
 
 # ── Parser flow ─────────────────────────────────────────────────────────────
@@ -218,9 +279,10 @@ async def handle_resolver_file(
         except TelegramBadRequest:
             pass  # same content / message deleted — ignore
 
+    selected_model = get_selected_model(message.chat.id, bot_settings.model)
     pipeline = AIResolverPipeline(
         api_key=bot_settings.anthropic_api_key,
-        model=bot_settings.model,
+        model=selected_model,
         use_batch=True,
     )
     try:
