@@ -79,8 +79,11 @@ class AsyncClaudeClient:
                     f"Kirish={input_tokens}, Chiqish={output_tokens}"
                 )
 
-                # Extract response text
-                text_response = "".join(block.text for block in response.content).strip()
+                # Extract response text — skip non-text blocks (e.g. ThinkingBlock,
+                # returned by default on models like Sonnet 5 with adaptive thinking on)
+                text_response = "".join(
+                    block.text for block in response.content if block.type == "text"
+                ).strip()
 
                 # Clean response (sometimes Claude wraps in code blocks even if told not to)
                 cleaned_text = self._clean_json_response(text_response)

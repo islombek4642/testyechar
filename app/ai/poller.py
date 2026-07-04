@@ -100,8 +100,11 @@ class BatchPoller:
         async for res in await self.client.beta.messages.batches.results(batch_id):
             # res is BetaMessageBatchIndividualResponse
             if res.result.type == "succeeded":
-                # Succeeded response
-                text_response = "".join(block.text for block in res.result.message.content).strip()
+                # Succeeded response — skip non-text blocks (e.g. ThinkingBlock,
+                # returned by default on models like Sonnet 5 with adaptive thinking on)
+                text_response = "".join(
+                    block.text for block in res.result.message.content if block.type == "text"
+                ).strip()
                 cleaned_text = dummy_client._clean_json_response(text_response)
 
                 try:
