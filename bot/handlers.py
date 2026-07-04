@@ -103,6 +103,16 @@ _user_model: dict[int, str] = {}
 # tahrirlab, tanlov tasdiqlanganini ko'rsatish uchun.
 _settings_msg_id: dict[int, int] = {}
 
+# Hozir Parser yoki Resolver jarayoni ishlab turgan chatlar — qiymat
+# foydalanuvchiga ko'rsatiladigan jarayon nomi ("Parser" / "AI Resolver").
+# Jarayon tugamaguncha o'sha chatda boshqa hech qanday amal qabul
+# qilinmaydi (BusyGuardMiddleware orqali).
+_busy_chats: dict[int, str] = {}
+
+
+def is_chat_busy(chat_id: int) -> Optional[str]:
+    return _busy_chats.get(chat_id)
+
 
 def file_ext(filename: Optional[str]) -> str:
     if not filename or "." not in filename:
@@ -364,38 +374,42 @@ async def handle_parser_file(message: Message, state: FSMContext, bot: Bot) -> N
         await message.answer("❌ Fayl juda katta (20 MB dan oshmasligi kerak).")
         return
 
-    status = await send_status_and_restore_menu(message, "⏳ Tahlil qilinmoqda…")
-    tmp_dir = core_settings.data_dir / "tmp"
-    tmp_dir.mkdir(parents=True, exist_ok=True)
-    # doc.file_name tashqaridan keladi — yo'l sifatida ishlatilmaydi,
-    # faqat tekshirilgan kengaytma + tasodifiy nom bilan saqlanadi.
-    path = tmp_dir / f"{message.chat.id}_{uuid4().hex}.{ext}"
+    _busy_chats[message.chat.id] = "Parser"
     try:
-        await bot.download(doc, destination=path)
-        result = await asyncio.to_thread(ParsingPipeline().run, path, FormatType.AUTO)
-    except Exception as exc:  # yuklab olish/pipeline xatosi botni yiqitmasligi kerak
-        log.exception("Parser pipeline xatosi")
-        await status.edit_text(f"❌ Tahlilda xato: {html.escape(str(exc))}")
-        return
-    finally:
-        path.unlink(missing_ok=True)
+        status = await send_status_and_restore_menu(message, "⏳ Tahlil qilinmoqda…")
+        tmp_dir = core_settings.data_dir / "tmp"
+        tmp_dir.mkdir(parents=True, exist_ok=True)
+        # doc.file_name tashqaridan keladi — yo'l sifatida ishlatilmaydi,
+        # faqat tekshirilgan kengaytma + tasodifiy nom bilan saqlanadi.
+        path = tmp_dir / f"{message.chat.id}_{uuid4().hex}.{ext}"
+        try:
+            await bot.download(doc, destination=path)
+            result = await asyncio.to_thread(ParsingPipeline().run, path, FormatType.AUTO)
+        except Exception as exc:  # yuklab olish/pipeline xatosi botni yiqitmasligi kerak
+            log.exception("Parser pipeline xatosi")
+            await status.edit_text(f"❌ Tahlilda xato: {html.escape(str(exc))}")
+            return
+        finally:
+            path.unlink(missing_ok=True)
 
-    if not result.questions:
+        if not result.questions:
+            await status.edit_text(
+                "❌ Faylda savollar topilmadi. Fayl formati to'g'riligini tekshiring."
+            )
+            return
+
+        extra = []
+        if ext == "doc":
+            extra.append(".doc fayl zaxira usulda o'qildi — sifat pastroq bo'lishi mumkin.")
+
+        base = doc.file_name.rsplit(".", 1)[0]
+        _results[message.chat.id] = CachedResult("parser", base, questions=result.questions)
         await status.edit_text(
-            "❌ Faylda savollar topilmadi. Fayl formati to'g'riligini tekshiring."
+            format_parser_summary(doc.file_name, result, extra_warnings=extra),
+            reply_markup=export_keyboard("parser"),
         )
-        return
-
-    extra = []
-    if ext == "doc":
-        extra.append(".doc fayl zaxira usulda o'qildi — sifat pastroq bo'lishi mumkin.")
-
-    base = doc.file_name.rsplit(".", 1)[0]
-    _results[message.chat.id] = CachedResult("parser", base, questions=result.questions)
-    await status.edit_text(
-        format_parser_summary(doc.file_name, result, extra_warnings=extra),
-        reply_markup=export_keyboard("parser"),
-    )
+    finally:
+        _busy_chats.pop(message.chat.id, None)
 
 
 # ── Resolver flow ───────────────────────────────────────────────────────────
@@ -419,53 +433,57 @@ async def handle_resolver_file(
     buf = await bot.download(doc)  # BytesIO when destination is omitted
     content = buf.read()
 
-    status = await send_status_and_restore_menu(message, "🤖 Savollar Batch API'ga yuborilmoqda…")
-    throttle = {"text": "", "t": 0.0}
-    started = time.monotonic()
-
-    async def progress(msg_text: str, frac: float) -> None:
-        # O'tgan vaqt qatori har pollda o'zgaradi — foydalanuvchi bot
-        # tirikligini ko'radi (Batch API hisoblagichlari oxirigacha 0 bo'lib turadi).
-        elapsed = int(time.monotonic() - started)
-        text = (
-            f"🤖 {msg_text} ({frac * 100:.0f}%)\n"
-            f"⏱ O'tgan vaqt: {elapsed // 60:02d}:{elapsed % 60:02d} — "
-            f"Batch odatda 15-30 daqiqada tugaydi, kuting…"
-        )
-        now = time.monotonic()
-        if text == throttle["text"] or now - throttle["t"] < 8.0:
-            return
-        throttle["text"], throttle["t"] = text, now
-        try:
-            await status.edit_text(text)
-        except Exception:
-            # Progress xabarini yangilash shunchaki kosmetik amal — tarmoq
-            # uzilishi yoki Telegram xatosi tufayli bu yerda muvaffaqiyatsiz
-            # bo'lish asosiy Batch kutish jarayonini (poll_until_complete)
-            # to'xtatib qo'ymasligi kerak. Keng Exception ushlanadi, chunki
-            # aynan shu sabab (tarmoq uzilishi TelegramBadRequest bo'lmagani
-            # uchun) ilgari butun resolver ishini bekor qilib qo'ygan edi.
-            log.warning("Progress xabarini yangilab bo'lmadi, davom etilmoqda", exc_info=True)
-
-    selected_model = get_selected_model(message.chat.id, bot_settings.model)
-    pipeline = AIResolverPipeline(
-        api_key=bot_settings.anthropic_api_key,
-        model=selected_model,
-        use_batch=True,
-    )
+    _busy_chats[message.chat.id] = "AI Resolver"
     try:
-        merge, stats = await pipeline.run(content, file_type=ext, progress_callback=progress)
-    except Exception as exc:
-        log.exception("Resolver pipeline xatosi")
-        await status.edit_text(f"❌ AI yechishda xato: {html.escape(str(exc))}")
-        return
+        status = await send_status_and_restore_menu(message, "🤖 Savollar Batch API'ga yuborilmoqda…")
+        throttle = {"text": "", "t": 0.0}
+        started = time.monotonic()
 
-    base = doc.file_name.rsplit(".", 1)[0]
-    _results[message.chat.id] = CachedResult("resolver", base, merge=merge)
-    await status.edit_text(
-        format_resolver_summary(doc.file_name, merge, stats),
-        reply_markup=export_keyboard("resolver"),
-    )
+        async def progress(msg_text: str, frac: float) -> None:
+            # O'tgan vaqt qatori har pollda o'zgaradi — foydalanuvchi bot
+            # tirikligini ko'radi (Batch API hisoblagichlari oxirigacha 0 bo'lib turadi).
+            elapsed = int(time.monotonic() - started)
+            text = (
+                f"🤖 {msg_text} ({frac * 100:.0f}%)\n"
+                f"⏱ O'tgan vaqt: {elapsed // 60:02d}:{elapsed % 60:02d} — "
+                f"Batch odatda 15-30 daqiqada tugaydi, kuting…"
+            )
+            now = time.monotonic()
+            if text == throttle["text"] or now - throttle["t"] < 8.0:
+                return
+            throttle["text"], throttle["t"] = text, now
+            try:
+                await status.edit_text(text)
+            except Exception:
+                # Progress xabarini yangilash shunchaki kosmetik amal — tarmoq
+                # uzilishi yoki Telegram xatosi tufayli bu yerda muvaffaqiyatsiz
+                # bo'lish asosiy Batch kutish jarayonini (poll_until_complete)
+                # to'xtatib qo'ymasligi kerak. Keng Exception ushlanadi, chunki
+                # aynan shu sabab (tarmoq uzilishi TelegramBadRequest bo'lmagani
+                # uchun) ilgari butun resolver ishini bekor qilib qo'ygan edi.
+                log.warning("Progress xabarini yangilab bo'lmadi, davom etilmoqda", exc_info=True)
+
+        selected_model = get_selected_model(message.chat.id, bot_settings.model)
+        pipeline = AIResolverPipeline(
+            api_key=bot_settings.anthropic_api_key,
+            model=selected_model,
+            use_batch=True,
+        )
+        try:
+            merge, stats = await pipeline.run(content, file_type=ext, progress_callback=progress)
+        except Exception as exc:
+            log.exception("Resolver pipeline xatosi")
+            await status.edit_text(f"❌ AI yechishda xato: {html.escape(str(exc))}")
+            return
+
+        base = doc.file_name.rsplit(".", 1)[0]
+        _results[message.chat.id] = CachedResult("resolver", base, merge=merge)
+        await status.edit_text(
+            format_resolver_summary(doc.file_name, merge, stats),
+            reply_markup=export_keyboard("resolver"),
+        )
+    finally:
+        _busy_chats.pop(message.chat.id, None)
 
 
 # ── Export buttons ──────────────────────────────────────────────────────────

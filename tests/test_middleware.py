@@ -1,7 +1,7 @@
 import asyncio
 from types import SimpleNamespace
 
-from bot.middleware import AccessMiddleware
+from bot.middleware import AccessMiddleware, BusyGuardMiddleware
 
 
 class FakeEvent:
@@ -36,5 +36,30 @@ def test_allows_known_user():
         called["yes"] = True
 
     asyncio.run(mw(handler, event, {"event_from_user": SimpleNamespace(id=1)}))
+    assert called.get("yes")
+    assert not event.replies
+
+
+def test_busy_guard_blocks_when_chat_is_busy():
+    mw = BusyGuardMiddleware(is_busy=lambda chat_id: "Parser" if chat_id == 42 else None)
+    event, called = FakeEvent(), {}
+
+    async def handler(e, d):
+        called["yes"] = True
+
+    asyncio.run(mw(handler, event, {"event_chat": SimpleNamespace(id=42)}))
+    assert "yes" not in called
+    assert event.replies
+    assert "Parser" in event.replies[0]
+
+
+def test_busy_guard_passes_through_when_not_busy():
+    mw = BusyGuardMiddleware(is_busy=lambda chat_id: None)
+    event, called = FakeEvent(), {}
+
+    async def handler(e, d):
+        called["yes"] = True
+
+    asyncio.run(mw(handler, event, {"event_chat": SimpleNamespace(id=42)}))
     assert called.get("yes")
     assert not event.replies

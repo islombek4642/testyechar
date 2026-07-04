@@ -11,8 +11,8 @@ from app.utils.logger import get_logger
 
 from bot.allowed_users import AllowedUsersStore
 from bot.config import load_settings
-from bot.handlers import router
-from bot.middleware import AccessMiddleware
+from bot.handlers import is_chat_busy, router
+from bot.middleware import AccessMiddleware, BusyGuardMiddleware
 
 log = get_logger(__name__)
 
@@ -35,6 +35,7 @@ async def main() -> None:
     dp = Dispatcher(bot_settings=settings, allowed_users=allowed_users)
 
     dp.message.outer_middleware(AccessMiddleware(allowed_users))
+    dp.message.outer_middleware(BusyGuardMiddleware(is_chat_busy))
     dp.callback_query.outer_middleware(AccessMiddleware(allowed_users))
     dp.include_router(router)
 
