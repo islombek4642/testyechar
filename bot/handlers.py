@@ -478,25 +478,23 @@ async def handle_resolve_ai(cb: CallbackQuery, bot_settings: BotSettings) -> Non
 
     _busy_chats[chat_id] = "AI Resolver"
     try:
+        waiting_text = "⏳ Javoblar aniqlanmoqda, iltimos kuting…\nBu bir necha daqiqadan yarim soatgacha davom etishi mumkin."
         status = await send_status_and_restore_menu(
-            cb.message, "🤖 Savollar Batch API'ga yuborilmoqda…", main_keyboard(is_admin)
+            cb.message, waiting_text, main_keyboard(is_admin)
         )
-        throttle = {"text": "", "t": 0.0}
+        throttle = {"t": 0.0}
         started = time.monotonic()
 
         async def progress(msg_text: str, frac: float) -> None:
-            # O'tgan vaqt qatori har pollda o'zgaradi — foydalanuvchi bot
-            # tirikligini ko'radi (Batch API hisoblagichlari oxirigacha 0 bo'lib turadi).
-            elapsed = int(time.monotonic() - started)
-            text = (
-                f"🤖 {msg_text} ({frac * 100:.0f}%)\n"
-                f"⏱ O'tgan vaqt: {elapsed // 60:02d}:{elapsed % 60:02d} — "
-                f"Batch odatda 15-30 daqiqada tugaydi, kuting…"
-            )
+            # Foydalanuvchiga faqat o'tgan vaqt ko'rsatiladi — Batch/holat
+            # tafsilotlari (msg_text, frac) unga kerak emas, faqat bot
+            # tirikligini bilishi kifoya.
             now = time.monotonic()
-            if text == throttle["text"] or now - throttle["t"] < 8.0:
+            if now - throttle["t"] < 8.0:
                 return
-            throttle["text"], throttle["t"] = text, now
+            throttle["t"] = now
+            elapsed = int(now - started)
+            text = f"{waiting_text}\n⏱ O'tgan vaqt: {elapsed // 60:02d}:{elapsed % 60:02d}"
             try:
                 await status.edit_text(text)
             except Exception:
