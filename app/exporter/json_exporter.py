@@ -154,22 +154,22 @@ class JSONExporter:
 
     def to_docx_bytes(self, questions: List[ParsedQuestion]) -> bytes:
         """
-        Generate a DOCX file in-memory and return raw bytes.
+        Generate a DOCX file in-memory and return raw bytes, in the same
+        plain Classic-format style as AIDocxExporter (app/ai/docx_exporter.py)
+        so the Parser's export and the AI-resolved export look identical:
+          ? question text
+          [image — if any]
+          + correct option
+          = wrong options
 
-        - Question text in bold (Cambria, 11 pt)
-        - Correct answer in green
-        - Wrong answers in grey
-        - Mathematical italic Unicode letters (𝑥, 𝑙𝑜𝑔, 𝑐𝑡𝑔…) are converted
-          to plain ASCII so they display correctly in Word without requiring
-          specialised math fonts.
-        - Greek letters (α β π √) and math operators are preserved as Unicode
-          and rendered by Cambria which covers those blocks.
+        Mathematical italic Unicode letters (𝑥, 𝑙𝑜𝑔, 𝑐𝑡𝑔…) are still
+        converted to plain ASCII so they display correctly in Word without
+        requiring specialised math fonts; this is a correctness fix, not
+        styling, so it stays regardless of the plain layout.
         """
         try:
             from docx import Document
-            from docx.shared import Pt, RGBColor, Inches
-            from docx.enum.text import WD_ALIGN_PARAGRAPH
-            from docx.oxml.ns import qn
+            from docx.shared import Inches
         except ImportError:
             raise ImportError(
                 "python-docx kutubxonasi o'rnatilmagan. "
@@ -178,31 +178,8 @@ class JSONExporter:
 
         doc = Document()
 
-        # Set document default font to Cambria — covers Greek and math operators
-        style = doc.styles["Normal"]
-        style.font.name = "Cambria"
-        style.font.size = Pt(11)
-
-        # Also patch the theme font so Cambria is used for Latin text
-        from docx.oxml import OxmlElement
-        rPr = style.element.get_or_add_rPr()
-        rFonts = rPr.find(qn("w:rFonts"))
-        if rFonts is None:
-            rFonts = OxmlElement("w:rFonts")
-            rPr.insert(0, rFonts)
-        for attr in ("w:ascii", "w:hAnsi", "w:cs"):
-            rFonts.set(qn(attr), "Cambria")
-
-        title = doc.add_heading("Test Savollari", level=0)
-        title.alignment = WD_ALIGN_PARAGRAPH.CENTER
-        doc.add_paragraph()
-
-        for idx, q in enumerate(questions, start=1):
-            q_para = doc.add_paragraph()
-            q_run = q_para.add_run(f"? {_docx_safe(q.q)}")
-            q_run.bold = True
-            q_run.font.name = "Cambria"
-            q_run.font.size = Pt(11)
+        for q in questions:
+            doc.add_paragraph(f"? {_docx_safe(q.q)}")
 
             for img_rel_path in q.img:
                 img_path = settings.output_dir / img_rel_path
@@ -214,15 +191,7 @@ class JSONExporter:
 
             for opt_idx, opt in enumerate(q.o):
                 marker = "+" if opt_idx == q.c else "="
-                opt_para = doc.add_paragraph()
-                opt_para.paragraph_format.left_indent = Pt(20)
-                opt_run = opt_para.add_run(f"{marker} {_docx_safe(opt)}")
-                opt_run.font.name = "Cambria"
-                opt_run.font.size = Pt(10.5)
-                if opt_idx == q.c:
-                    opt_run.font.color.rgb = RGBColor(0x16, 0xA3, 0x4A)
-                else:
-                    opt_run.font.color.rgb = RGBColor(0x47, 0x55, 0x69)
+                doc.add_paragraph(f"{marker} {_docx_safe(opt)}")
 
             doc.add_paragraph()
 
