@@ -28,9 +28,11 @@ PRICING = {
         "output_per_mtok": 25.00,
         "batch_discount": 0.50,
     },
+    # Introductory pricing through 2026-08-31; reverts to $3/$15 on 2026-09-01
+    # (see https://platform.claude.com/docs/en/about-claude/pricing).
     "claude-sonnet-5": {
-        "input_per_mtok": 3.00,
-        "output_per_mtok": 15.00,
+        "input_per_mtok": 2.00,
+        "output_per_mtok": 10.00,
         "batch_discount": 0.50,
     },
 }
