@@ -30,6 +30,8 @@ def format_parser_summary(filename: str, result: PipelineResult) -> str:
     ]
     if image_count:
         lines.append(f"🖼 Rasmli savollar: <b>{image_count}</b>")
+    if result.removed_duplicates:
+        lines.append(f"♻️ Dublikatlar (olib tashlandi): <b>{len(result.removed_duplicates)}</b>")
     lines.append(f"⏱ Davomiylik: <b>{result.stats.duration_seconds:.1f} soniya</b>")
     lines.append(CHOOSE_FORMAT)
     return "\n".join(lines)

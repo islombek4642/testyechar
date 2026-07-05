@@ -6,13 +6,14 @@ from app.models.question import ParsedQuestion, ParsingStats
 from bot.formatters import format_parser_summary, format_resolver_summary
 
 
-def _parser_result(questions=None, duration_seconds=4.2) -> PipelineResult:
+def _parser_result(questions=None, duration_seconds=4.2, removed_duplicates=None) -> PipelineResult:
     r = PipelineResult()
     r.questions = questions if questions is not None else [
         ParsedQuestion(q="S1?", o=["A", "B"], c=0),
         ParsedQuestion(q="S2?", o=["A", "B"], c=-1),
     ]
     r.stats = ParsingStats(duration_seconds=duration_seconds)
+    r.removed_duplicates = removed_duplicates or []
     return r
 
 
@@ -44,6 +45,17 @@ def test_parser_summary_shows_image_count_only_when_present():
 
     assert "Rasmli savollar" in format_parser_summary("t.pdf", _parser_result(questions=with_image))
     assert "Rasmli savollar" not in format_parser_summary("t.pdf", _parser_result(questions=without_image))
+
+
+def test_parser_summary_shows_duplicate_count_only_when_present():
+    with_dupes = _parser_result(removed_duplicates=["Takroriy savol matni"])
+    without_dupes = _parser_result(removed_duplicates=[])
+
+    text_with = format_parser_summary("t.pdf", with_dupes)
+    text_without = format_parser_summary("t.pdf", without_dupes)
+
+    assert "Dublikatlar" in text_with and "<b>1</b>" in text_with
+    assert "Dublikatlar" not in text_without
 
 
 def test_resolver_summary_shows_only_the_5_essentials():
