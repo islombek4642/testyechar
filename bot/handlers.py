@@ -442,8 +442,9 @@ async def handle_test_file(
         # jarayon davomida to'plangan boshqa xabarlar (masalan, band-holat
         # ogohlantirishlari) ortida "yashirinib" qolmaydi, chunki tahrirlash
         # chatda yangi bildirishnoma hosil qilmaydi, yangi xabar esa qiladi.
+        # Progress xabarining o'zi endi keraksiz — o'chiramiz.
         try:
-            await status.edit_text("✅ Tayyor.")
+            await status.delete()
         except Exception:
             pass
         docx_bytes = JSONExporter().to_docx_bytes(result.questions)
@@ -529,8 +530,9 @@ async def handle_resolve_ai(cb: CallbackQuery, bot_settings: BotSettings) -> Non
         # Xuddi handle_test_file'dagidek: yakuniy natija tahrirlanadigan
         # xabar emas, DOCX fayl biriktirilgan yangi xabar sifatida
         # yuboriladi — shunda u har doim chatning oxirida ko'rinadi.
+        # Progress xabarining o'zi endi keraksiz — o'chiramiz.
         try:
-            await status.edit_text("✅ Tayyor.")
+            await status.delete()
         except Exception:
             pass
         name = f"{base}_resolved.docx"
