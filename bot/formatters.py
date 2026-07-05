@@ -13,8 +13,6 @@ from app.ai.merger import MergeResult
 from app.ai.statistics import AIStatistics
 from app.core.pipeline import PipelineResult
 
-CHOOSE_FORMAT = "\n⬇️ Natijani DOCX shaklida yuklab oling:"
-
 
 def format_parser_summary(filename: str, result: PipelineResult) -> str:
     questions = result.questions
@@ -33,7 +31,6 @@ def format_parser_summary(filename: str, result: PipelineResult) -> str:
     if result.removed_duplicates:
         lines.append(f"♻️ Dublikatlar (olib tashlandi): <b>{len(result.removed_duplicates)}</b>")
     lines.append(f"⏱ Davomiylik: <b>{result.stats.duration_seconds:.1f} soniya</b>")
-    lines.append(CHOOSE_FORMAT)
     return "\n".join(lines)
 
 
@@ -47,5 +44,4 @@ def format_resolver_summary(filename: str, merge: MergeResult, stats: AIStatisti
     if merge.images:
         lines.append(f"🖼 Rasmli savollar: <b>{len(merge.images)}</b>")
     lines.append(f"⏱ Davomiylik: <b>{stats.duration_seconds:.0f} soniya</b>")
-    lines.append(CHOOSE_FORMAT)
     return "\n".join(lines)

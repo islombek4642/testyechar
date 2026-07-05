@@ -63,3 +63,28 @@ def test_busy_guard_passes_through_when_not_busy():
     asyncio.run(mw(handler, event, {"event_chat": SimpleNamespace(id=42)}))
     assert called.get("yes")
     assert not event.replies
+
+
+def test_busy_guard_notifies_once_then_throttles_until_interval_passes(monkeypatch):
+    import bot.middleware as middleware_module
+
+    fake_now = {"t": 0.0}
+    monkeypatch.setattr(middleware_module.time, "monotonic", lambda: fake_now["t"])
+
+    mw = BusyGuardMiddleware(is_busy=lambda chat_id: "Tahlil", notify_interval=20.0)
+    event = FakeEvent()
+    data = {"event_chat": SimpleNamespace(id=42)}
+
+    async def handler(e, d):
+        pass
+
+    asyncio.run(mw(handler, event, data))
+    assert len(event.replies) == 1
+
+    fake_now["t"] = 5.0  # still inside the throttle window
+    asyncio.run(mw(handler, event, data))
+    assert len(event.replies) == 1  # no repeat notification yet
+
+    fake_now["t"] = 25.0  # window has passed
+    asyncio.run(mw(handler, event, data))
+    assert len(event.replies) == 2

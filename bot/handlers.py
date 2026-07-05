@@ -157,21 +157,14 @@ def build_ai_raw_questions(questions: List[ParsedQuestion]) -> List[AIRawQuestio
     return raw_ai_qs
 
 
-def export_keyboard(kind: str) -> InlineKeyboardMarkup:
-    return InlineKeyboardMarkup(
-        inline_keyboard=[[InlineKeyboardButton(text="📖 DOCX", callback_data=f"exp:{kind}")]]
-    )
-
-
-def parser_result_keyboard(has_unresolved: bool) -> InlineKeyboardMarkup:
-    """Tahlil natijasi tugmalari: DOCX yuklash har doim bepul va mavjud;
-    AI bilan yechish tugmasi faqat javobsiz savol bo'lsa ko'rinadi (pullik)."""
-    rows = [[InlineKeyboardButton(text="📖 DOCX", callback_data="exp:parser")]]
-    if has_unresolved:
-        rows.append(
-            [InlineKeyboardButton(text="🤖 To'g'ri javobni aniqlash", callback_data="resolve:ai")]
-        )
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+def parser_result_keyboard(has_unresolved: bool) -> Optional[InlineKeyboardMarkup]:
+    """DOCX endi tugma emas — natija xabariga fayl sifatida biriktiriladi.
+    Faqat javobsiz savol bo'lsa, AI bilan yechish tugmasi (pullik) chiqadi."""
+    if not has_unresolved:
+        return None
+    return InlineKeyboardMarkup(inline_keyboard=[[
+        InlineKeyboardButton(text="🤖 To'g'ri javobni aniqlash", callback_data="resolve:ai")
+    ]])
 
 
 def get_active_model(default: str) -> str:
@@ -443,8 +436,20 @@ async def handle_test_file(
         base = doc.file_name.rsplit(".", 1)[0]
         _results[message.chat.id] = CachedResult("parser", base, questions=result.questions)
         has_unresolved = any(q.c == -1 for q in result.questions)
-        await status.edit_text(
-            format_parser_summary(doc.file_name, result),
+
+        # Natija endi "tahrirlangan xabar + tugma" emas, balki yangi xabar
+        # sifatida DOCX fayl biriktirilgan holda yuboriladi — shunda u
+        # jarayon davomida to'plangan boshqa xabarlar (masalan, band-holat
+        # ogohlantirishlari) ortida "yashirinib" qolmaydi, chunki tahrirlash
+        # chatda yangi bildirishnoma hosil qilmaydi, yangi xabar esa qiladi.
+        try:
+            await status.edit_text("✅ Tayyor.")
+        except Exception:
+            pass
+        docx_bytes = JSONExporter().to_docx_bytes(result.questions)
+        await message.answer_document(
+            BufferedInputFile(docx_bytes, filename=f"{base}_questions.docx"),
+            caption=format_parser_summary(doc.file_name, result),
             reply_markup=parser_result_keyboard(has_unresolved),
         )
     finally:
@@ -521,43 +526,21 @@ async def handle_resolve_ai(cb: CallbackQuery, bot_settings: BotSettings) -> Non
             await status.edit_text(f"❌ AI yechishda xato: {html.escape(str(exc))}")
             return
 
-        _results[chat_id] = CachedResult("resolver", base, merge=merge)
-        await status.edit_text(
-            format_resolver_summary(base, merge, stats),
-            reply_markup=export_keyboard("resolver"),
+        # Xuddi handle_test_file'dagidek: yakuniy natija tahrirlanadigan
+        # xabar emas, DOCX fayl biriktirilgan yangi xabar sifatida
+        # yuboriladi — shunda u har doim chatning oxirida ko'rinadi.
+        try:
+            await status.edit_text("✅ Tayyor.")
+        except Exception:
+            pass
+        name = f"{base}_resolved.docx"
+        docx_bytes = AIDocxExporter().export(merge, name)
+        await cb.message.answer_document(
+            BufferedInputFile(docx_bytes, filename=name),
+            caption=format_resolver_summary(base, merge, stats),
         )
     finally:
         _busy_chats.pop(chat_id, None)
-
-
-# ── Export buttons ──────────────────────────────────────────────────────────
-
-@router.callback_query(F.data.startswith("exp:"))
-async def handle_export(cb: CallbackQuery) -> None:
-    _, kind = cb.data.split(":")
-    if cb.message is None:
-        await cb.answer("Xabar eskirgan — yangi fayl yuboring.", show_alert=True)
-        return
-    cached = _results.get(cb.message.chat.id)
-    if cached is None or cached.kind != kind:
-        await cb.answer("Natija topilmadi — yangi fayl yuboring.", show_alert=True)
-        return
-
-    try:
-        if kind == "parser":
-            data = JSONExporter().to_docx_bytes(cached.questions)
-            name = f"{cached.base_name}_questions.docx"
-        else:
-            name = f"{cached.base_name}_resolved.docx"
-            data = AIDocxExporter().export(cached.merge, name)
-
-        await cb.message.answer_document(BufferedInputFile(data, filename=name))
-    except Exception:
-        log.exception("Eksport xatosi")
-        await cb.answer("❌ Eksportda xato yuz berdi.", show_alert=True)
-        return
-
-    await cb.answer()
 
 
 # ── Fallbacks ───────────────────────────────────────────────────────────────

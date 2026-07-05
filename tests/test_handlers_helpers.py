@@ -8,7 +8,6 @@ from bot.handlers import (
     MAIN_KB_ADMIN,
     build_ai_raw_questions,
     file_ext,
-    export_keyboard,
     parser_result_keyboard,
     send_status_and_restore_menu,
     PARSER_EXTS,
@@ -26,16 +25,14 @@ def test_ext_sets():
     assert PARSER_EXTS == {"pdf", "docx", "doc", "xlsx", "txt"}
 
 
-def test_parser_result_keyboard_hides_ai_button_when_fully_resolved():
-    kb = parser_result_keyboard(has_unresolved=False)
-    callback_data = [b.callback_data for row in kb.inline_keyboard for b in row]
-    assert callback_data == ["exp:parser"]
+def test_parser_result_keyboard_is_none_when_fully_resolved():
+    assert parser_result_keyboard(has_unresolved=False) is None
 
 
 def test_parser_result_keyboard_shows_ai_button_when_unresolved_exist():
     kb = parser_result_keyboard(has_unresolved=True)
     callback_data = [b.callback_data for row in kb.inline_keyboard for b in row]
-    assert callback_data == ["exp:parser", "resolve:ai"]
+    assert callback_data == ["resolve:ai"]
 
 
 def test_build_ai_raw_questions_marks_already_answered_option_correct():
@@ -70,12 +67,6 @@ def test_build_ai_raw_questions_missing_image_file_stays_none(tmp_path, monkeypa
     questions = [ParsedQuestion(q="Ghost image?", o=["A", "B"], c=-1, img=["images/missing.png"])]
     raw_ai_qs = build_ai_raw_questions(questions)
     assert raw_ai_qs[0].image is None
-
-
-def test_export_keyboard_callback_data():
-    kb = export_keyboard("resolver")
-    buttons = kb.inline_keyboard[0]
-    assert [b.callback_data for b in buttons] == ["exp:resolver"]
 
 
 class _FakeSentMessage:

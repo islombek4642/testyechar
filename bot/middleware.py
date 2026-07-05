@@ -1,6 +1,7 @@
 """Access-control and busy-chat middlewares."""
 from __future__ import annotations
 
+import time
 from typing import Any, Awaitable, Callable, Dict, Optional
 
 from aiogram import BaseMiddleware
@@ -27,10 +28,21 @@ class AccessMiddleware(BaseMiddleware):
 
 
 class BusyGuardMiddleware(BaseMiddleware):
-    """Blocks new messages/callbacks in a chat while a test-solving job is running there."""
+    """Blocks new messages/callbacks in a chat while a test-solving job is running there.
 
-    def __init__(self, is_busy: Callable[[int], Optional[str]]) -> None:
+    Notifies the user at most once per notify_interval seconds per chat —
+    without this, an impatient user tapping/sending repeatedly during a
+    long wait would get a fresh "band" reply for every single tap, which
+    both spams the chat and pushes the eventual result message further and
+    further behind, out of easy view.
+    """
+
+    def __init__(
+        self, is_busy: Callable[[int], Optional[str]], notify_interval: float = 20.0
+    ) -> None:
         self.is_busy = is_busy
+        self.notify_interval = notify_interval
+        self._last_notified: Dict[int, Optional[float]] = {}
 
     async def __call__(
         self,
@@ -41,9 +53,13 @@ class BusyGuardMiddleware(BaseMiddleware):
         chat = data.get("event_chat")
         label = self.is_busy(chat.id) if chat is not None else None
         if label is not None:
-            if hasattr(event, "answer"):
-                await event.answer(
-                    f"⏳ Hozircha {label} davom etmoqda — birozdan keyin qayta urinib ko'ring."
-                )
+            now = time.monotonic()
+            last = self._last_notified.get(chat.id)
+            if last is None or now - last >= self.notify_interval:
+                self._last_notified[chat.id] = now
+                if hasattr(event, "answer"):
+                    await event.answer(
+                        f"⏳ Hozircha {label} davom etmoqda — birozdan keyin qayta urinib ko'ring."
+                    )
             return None
         return await handler(event, data)
