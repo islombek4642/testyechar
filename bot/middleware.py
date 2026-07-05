@@ -43,7 +43,7 @@ class BusyGuardMiddleware(BaseMiddleware):
         if label is not None:
             if hasattr(event, "answer"):
                 await event.answer(
-                    f"⏳ Hozircha band: {label} jarayoni tugashini kuting."
+                    f"⏳ Hozircha {label} davom etmoqda — birozdan keyin qayta urinib ko'ring."
                 )
             return None
         return await handler(event, data)

@@ -115,10 +115,12 @@ _active_model: Optional[str] = None
 # tahrirlab, tanlov tasdiqlanganini ko'rsatish uchun.
 _settings_msg_id: dict[int, int] = {}
 
-# Hozir tahlil yoki AI Resolver jarayoni ishlab turgan chatlar — qiymat
-# foydalanuvchiga ko'rsatiladigan jarayon nomi ("Tahlil" / "AI Resolver").
-# Jarayon tugamaguncha o'sha chatda boshqa hech qanday amal qabul
-# qilinmaydi (BusyGuardMiddleware orqali).
+# Hozir tahlil yoki javob aniqlash jarayoni ishlab turgan chatlar —
+# qiymat foydalanuvchiga ko'rsatiladigan jarayon nomi ("Tahlil" /
+# "Javob aniqlash"; ataylab "AI"/"Resolver" so'zlarisiz — foydalanuvchi
+# buning orqasida AI ishlayotganini bilishi shart emas). Jarayon
+# tugamaguncha o'sha chatda boshqa hech qanday amal qabul qilinmaydi
+# (BusyGuardMiddleware orqali).
 _busy_chats: dict[int, str] = {}
 
 
@@ -476,7 +478,7 @@ async def handle_resolve_ai(cb: CallbackQuery, bot_settings: BotSettings) -> Non
     raw_ai_qs = build_ai_raw_questions(cached.questions)
     base = cached.base_name
 
-    _busy_chats[chat_id] = "AI Resolver"
+    _busy_chats[chat_id] = "Javob aniqlash"
     try:
         waiting_text = "⏳ Javoblar aniqlanmoqda, iltimos kuting…\nBu bir necha daqiqadan yarim soatgacha davom etishi mumkin."
         status = await send_status_and_restore_menu(
