@@ -231,10 +231,10 @@ async def cmd_start(message: Message, state: FSMContext, bot_settings: BotSettin
     is_admin = message.from_user.id == bot_settings.admin_id
     await message.answer(
         "Assalomu alaykum!\n\n"
-        f"{BTN_TEST} — test faylini yuboring (PDF, DOCX, DOC, XLSX, TXT). "
-        "Fayl tahlil qilinadi va tartibli DOCX shaklida yuklab olasiz. "
-        "Agar javobi belgilanmagan savollar bo'lsa, ularni Claude AI "
-        "yordamida yechish tugmasi ham chiqadi.",
+        f"{BTN_TEST} — test faylini yuboring (PDF, DOCX, DOC, XLSX, TXT).\n"
+        "Fayl tahlil qilinib, natija DOCX faylda yuboriladi.\n"
+        "Agar ba'zi savollarga javob belgilanmagan bo'lsa, "
+        "\"🤖 To'g'ri javobni aniqlash\" tugmasi orqali ularni ham aniqlab olasiz.",
         reply_markup=main_keyboard(is_admin),
     )
 
