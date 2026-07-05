@@ -17,7 +17,7 @@ def test_load_settings_parses_env(monkeypatch):
     assert s.admin_id == 111
     assert s.allowed_users == frozenset({222, 333})
     assert s.anthropic_api_key == "sk-test"
-    assert s.model == "claude-opus-4-8"
+    assert s.model == "claude-opus-4-7"
 
 
 def test_is_allowed(monkeypatch):
