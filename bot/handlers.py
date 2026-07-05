@@ -23,13 +23,14 @@ from aiogram.types import (
 )
 
 from app.ai.docx_exporter import AIDocxExporter
+from app.ai.docx_parser import AIRawQuestion
 from app.ai.exporter import AIExporter
 from app.ai.merger import MergeResult
 from app.ai.pipeline import AIResolverPipeline
 from app.config import settings as core_settings
 from app.core.pipeline import ParsingPipeline
 from app.exporter import JSONExporter
-from app.models.question import ParsedQuestion
+from app.models.question import ParsedQuestion, RawOption, RawQuestion
 from app.parser import FormatType
 from app.utils.logger import get_logger
 
@@ -131,6 +132,29 @@ def file_ext(filename: Optional[str]) -> str:
     if not filename or "." not in filename:
         return ""
     return filename.rsplit(".", 1)[-1].lower()
+
+
+def build_ai_raw_questions(questions: List[ParsedQuestion]) -> List[AIRawQuestion]:
+    """Bridge Parser's ParsedQuestion list into AIResolverPipeline's own
+    AIRawQuestion format for resolve_raw_questions() — unlike routing
+    through to_classic_txt() (text-only), this reads each question's first
+    extracted image straight off disk so it survives into the AI request.
+    An already-marked correct option (q.c != -1) becomes is_correct=True,
+    so the resolver's own resolved/unresolved split still skips it.
+    """
+    raw_ai_qs: List[AIRawQuestion] = []
+    for q in questions:
+        options = [
+            RawOption(text=opt, is_correct=(idx == q.c)) for idx, opt in enumerate(q.o)
+        ]
+        raw_question = RawQuestion(question_text=q.q, options=options)
+        image_bytes = None
+        if q.img:
+            img_path = core_settings.output_dir / q.img[0]
+            if img_path.exists():
+                image_bytes = img_path.read_bytes()
+        raw_ai_qs.append(AIRawQuestion(question=raw_question, image=image_bytes))
+    return raw_ai_qs
 
 
 def export_keyboard(kind: str) -> InlineKeyboardMarkup:
@@ -453,11 +477,12 @@ async def handle_resolve_ai(cb: CallbackQuery, bot_settings: BotSettings) -> Non
 
     await cb.answer()
     is_admin = cb.from_user.id == bot_settings.admin_id
-    # Parser natijasidagi savollarni AI Resolver kutgan klassik `? = +`
-    # formatga aylantiramiz — allaqachon javobi belgilangan savollar `+`
-    # bilan chiqadi va Resolver ularni qayta yubormaydi (faqat `c == -1`
-    # bo'lganlar, ya'ni belgilanmaganlar, AI ga yuboriladi).
-    content = to_classic_txt(cached.questions).encode("utf-8")
+    # Parser natijasidagi savollarni AI Resolver'ning o'z AIRawQuestion
+    # formatiga aylantiramiz (to_classic_txt orqali emas — u faqat matn,
+    # rasmni saqlamaydi). Allaqachon javobi belgilangan savollar
+    # is_correct=True bilan chiqadi va Resolver ularni qayta yubormaydi
+    # (faqat `c == -1` bo'lganlar, ya'ni belgilanmaganlar, AI ga yuboriladi).
+    raw_ai_qs = build_ai_raw_questions(cached.questions)
     base = cached.base_name
 
     _busy_chats[chat_id] = "AI Resolver"
@@ -499,7 +524,7 @@ async def handle_resolve_ai(cb: CallbackQuery, bot_settings: BotSettings) -> Non
             use_batch=True,
         )
         try:
-            merge, stats = await pipeline.run(content, file_type="txt", progress_callback=progress)
+            merge, stats = await pipeline.resolve_raw_questions(raw_ai_qs, progress_callback=progress)
         except Exception as exc:
             log.exception("Resolver pipeline xatosi")
             await status.edit_text(f"❌ AI yechishda xato: {html.escape(str(exc))}")

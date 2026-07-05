@@ -57,7 +57,7 @@ class AIResolverPipeline:
         progress_callback: Callable[[str, float], None] | Callable[[str, float], Awaitable[None]] | None = None,
     ) -> tuple[MergeResult, AIStatistics]:
         """
-        Execute the resolution pipeline.
+        Parse a raw TXT/DOCX file and execute the resolution pipeline.
 
         Parameters
         ----------
@@ -65,9 +65,6 @@ class AIResolverPipeline:
         file_type : "txt" for classic text format, "docx" for Word document
         progress_callback : Callback function to report status and fractional progress (0.0 to 1.0)
         """
-        start_time = time.perf_counter()
-        warnings: List[str] = []
-
         async def report_progress(msg: str, frac: float) -> None:
             if progress_callback:
                 if asyncio.iscoroutinefunction(progress_callback):
@@ -85,6 +82,33 @@ class AIResolverPipeline:
                 AIRawQuestion(question=q, image=None)
                 for q in TXTQuizParser().parse(content.decode("utf-8"))
             ]
+
+        if not raw_ai_qs:
+            raise ValueError("Faylda hech qanday savol topilmadi.")
+
+        return await self.resolve_raw_questions(raw_ai_qs, progress_callback)
+
+    async def resolve_raw_questions(
+        self,
+        raw_ai_qs: List[AIRawQuestion],
+        progress_callback: Callable[[str, float], None] | Callable[[str, float], Awaitable[None]] | None = None,
+    ) -> tuple[MergeResult, AIStatistics]:
+        """
+        Resolve a list of already-parsed AIRawQuestion objects, skipping the
+        file-parsing step. Used when the caller already has parsed questions
+        (with real image bytes attached) from another source — e.g. the
+        bot's main Parser pipeline — and wants to feed them straight into AI
+        resolving without a lossy round-trip through the TXT/DOCX format.
+        """
+        start_time = time.perf_counter()
+        warnings: List[str] = []
+
+        async def report_progress(msg: str, frac: float) -> None:
+            if progress_callback:
+                if asyncio.iscoroutinefunction(progress_callback):
+                    await progress_callback(msg, frac)
+                else:
+                    progress_callback(msg, frac)
 
         all_questions = [aq.question for aq in raw_ai_qs]
 

@@ -1,7 +1,12 @@
 import asyncio
+from types import SimpleNamespace
 
+from app.models.question import ParsedQuestion
+
+from bot import handlers
 from bot.handlers import (
     MAIN_KB_ADMIN,
+    build_ai_raw_questions,
     file_ext,
     export_keyboard,
     parser_result_keyboard,
@@ -31,6 +36,40 @@ def test_parser_result_keyboard_shows_ai_button_when_unresolved_exist():
     kb = parser_result_keyboard(has_unresolved=True)
     callback_data = [b.callback_data for row in kb.inline_keyboard for b in row]
     assert callback_data == ["exp:parser:docx", "resolve:ai"]
+
+
+def test_build_ai_raw_questions_marks_already_answered_option_correct():
+    questions = [ParsedQuestion(q="2+2?", o=["3", "4", "5"], c=1)]
+    raw_ai_qs = build_ai_raw_questions(questions)
+    opts = raw_ai_qs[0].question.options
+    assert [o.is_correct for o in opts] == [False, True, False]
+    assert raw_ai_qs[0].image is None
+
+
+def test_build_ai_raw_questions_leaves_unmarked_question_all_false():
+    questions = [ParsedQuestion(q="Unmarked?", o=["A", "B"], c=-1)]
+    raw_ai_qs = build_ai_raw_questions(questions)
+    opts = raw_ai_qs[0].question.options
+    assert [o.is_correct for o in opts] == [False, False]
+
+
+def test_build_ai_raw_questions_reads_image_bytes_from_disk(tmp_path, monkeypatch):
+    monkeypatch.setattr(handlers, "core_settings", SimpleNamespace(output_dir=tmp_path))
+    (tmp_path / "images").mkdir()
+    image_path = tmp_path / "images" / "q1.png"
+    image_path.write_bytes(b"\x89PNG\r\n\x1a\nfake-bytes")
+
+    questions = [ParsedQuestion(q="With image?", o=["A", "B"], c=-1, img=["images/q1.png"])]
+    raw_ai_qs = build_ai_raw_questions(questions)
+
+    assert raw_ai_qs[0].image == b"\x89PNG\r\n\x1a\nfake-bytes"
+
+
+def test_build_ai_raw_questions_missing_image_file_stays_none(tmp_path, monkeypatch):
+    monkeypatch.setattr(handlers, "core_settings", SimpleNamespace(output_dir=tmp_path))
+    questions = [ParsedQuestion(q="Ghost image?", o=["A", "B"], c=-1, img=["images/missing.png"])]
+    raw_ai_qs = build_ai_raw_questions(questions)
+    assert raw_ai_qs[0].image is None
 
 
 def test_export_keyboard_callback_data():
