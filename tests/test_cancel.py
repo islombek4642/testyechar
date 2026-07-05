@@ -6,7 +6,7 @@ from bot.handlers import (
     MAIN_KB_ADMIN,
     MAIN_KB_USER,
     cancel_waiting,
-    choose_parser,
+    choose_test,
 )
 from bot.states import Mode
 
@@ -47,10 +47,10 @@ def test_cancel_keyboard_has_single_button():
     assert [b.text for b in buttons] == [BTN_CANCEL]
 
 
-def test_choose_parser_shows_cancel_keyboard():
+def test_choose_test_shows_cancel_keyboard():
     message, state = FakeMessage(), FakeState()
-    asyncio.run(choose_parser(message, state))
-    assert state.set_to == Mode.parser_waiting
+    asyncio.run(choose_test(message, state))
+    assert state.set_to == Mode.test_waiting
     _, markup = message.answers[0]
     assert markup is CANCEL_KB
 

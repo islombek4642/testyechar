@@ -3,8 +3,7 @@ from aiogram.fsm.state import State, StatesGroup
 
 
 class Mode(StatesGroup):
-    parser_waiting = State()
-    resolver_waiting = State()
+    test_waiting = State()
     choosing_model = State()
     managing_users = State()
     adding_user = State()

@@ -42,8 +42,7 @@ from bot.states import Mode
 log = get_logger(__name__)
 router = Router()
 
-BTN_PARSER = "📝 Parser"
-BTN_RESOLVER = "🤖 AI Resolver"
+BTN_TEST = "📝 Test yuborish"
 BTN_CANCEL = "❌ Bekor qilish"
 BTN_SETTINGS = "⚙️ Sozlamalar"
 BTN_MANAGE_USERS = "👥 Foydalanuvchilar"
@@ -51,13 +50,13 @@ BTN_ADD_USER = "➕ Yangi qo'shish"
 BTN_BACK = "⬅️ Orqaga"
 
 MAIN_KB_USER = ReplyKeyboardMarkup(
-    keyboard=[[KeyboardButton(text=BTN_PARSER), KeyboardButton(text=BTN_RESOLVER)]],
+    keyboard=[[KeyboardButton(text=BTN_TEST)]],
     resize_keyboard=True,
 )
 
 MAIN_KB_ADMIN = ReplyKeyboardMarkup(
     keyboard=[
-        [KeyboardButton(text=BTN_PARSER), KeyboardButton(text=BTN_RESOLVER)],
+        [KeyboardButton(text=BTN_TEST)],
         [KeyboardButton(text=BTN_SETTINGS)],
     ],
     resize_keyboard=True,
@@ -76,7 +75,6 @@ CANCEL_KB = ReplyKeyboardMarkup(
 )
 
 PARSER_EXTS = {"pdf", "docx", "doc", "xlsx", "txt"}
-RESOLVER_EXTS = {"txt", "docx"}
 MAX_FILE_BYTES = 20 * 1024 * 1024  # Telegram bot download limit
 
 # AI Resolver uchun tanlash mumkin bo'lgan modellar (ko'rsatiladigan tartibda).
@@ -118,8 +116,8 @@ _active_model: Optional[str] = None
 # tahrirlab, tanlov tasdiqlanganini ko'rsatish uchun.
 _settings_msg_id: dict[int, int] = {}
 
-# Hozir Parser yoki Resolver jarayoni ishlab turgan chatlar — qiymat
-# foydalanuvchiga ko'rsatiladigan jarayon nomi ("Parser" / "AI Resolver").
+# Hozir tahlil yoki AI Resolver jarayoni ishlab turgan chatlar — qiymat
+# foydalanuvchiga ko'rsatiladigan jarayon nomi ("Tahlil" / "AI Resolver").
 # Jarayon tugamaguncha o'sha chatda boshqa hech qanday amal qabul
 # qilinmaydi (BusyGuardMiddleware orqali).
 _busy_chats: dict[int, str] = {}
@@ -142,6 +140,17 @@ def export_keyboard(kind: str) -> InlineKeyboardMarkup:
             InlineKeyboardButton(text="📖 DOCX", callback_data=f"exp:{kind}:docx"),
         ]]
     )
+
+
+def parser_result_keyboard(has_unresolved: bool) -> InlineKeyboardMarkup:
+    """Tahlil natijasi tugmalari: DOCX yuklash har doim bepul va mavjud;
+    AI bilan yechish tugmasi faqat javobsiz savol bo'lsa ko'rinadi (pullik)."""
+    rows = [[InlineKeyboardButton(text="📖 DOCX", callback_data="exp:parser:docx")]]
+    if has_unresolved:
+        rows.append(
+            [InlineKeyboardButton(text="🤖 To'g'ri javobni aniqlash", callback_data="resolve:ai")]
+        )
+    return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
 def get_active_model(default: str) -> str:
@@ -207,34 +216,25 @@ async def cmd_start(message: Message, state: FSMContext, bot_settings: BotSettin
     await state.clear()
     is_admin = message.from_user.id == bot_settings.admin_id
     await message.answer(
-        "Assalomu alaykum! Rejimni tanlang:\n\n"
-        f"{BTN_PARSER} — test faylini tahlil qilish (PDF, DOCX, DOC, XLSX, TXT)\n"
-        f"{BTN_RESOLVER} — savollarga Claude AI yordamida javob topish (TXT, DOCX)",
+        "Assalomu alaykum!\n\n"
+        f"{BTN_TEST} — test faylini yuboring (PDF, DOCX, DOC, XLSX, TXT). "
+        "Fayl tahlil qilinadi va tartibli DOCX shaklida yuklab olasiz. "
+        "Agar javobi belgilanmagan savollar bo'lsa, ularni Claude AI "
+        "yordamida yechish tugmasi ham chiqadi.",
         reply_markup=main_keyboard(is_admin),
     )
 
 
-@router.message(F.text == BTN_PARSER)
-async def choose_parser(message: Message, state: FSMContext) -> None:
-    await state.set_state(Mode.parser_waiting)
+@router.message(F.text == BTN_TEST)
+async def choose_test(message: Message, state: FSMContext) -> None:
+    await state.set_state(Mode.test_waiting)
     await message.answer(
-        "📝 Parser rejimi.\nTest faylini yuboring (PDF, DOCX, DOC, XLSX yoki TXT, 20 MB gacha).",
+        "📝 Test faylini yuboring (PDF, DOCX, DOC, XLSX yoki TXT, 20 MB gacha).",
         reply_markup=CANCEL_KB,
     )
 
 
-@router.message(F.text == BTN_RESOLVER)
-async def choose_resolver(message: Message, state: FSMContext) -> None:
-    await state.set_state(Mode.resolver_waiting)
-    await message.answer(
-        "🤖 AI Resolver rejimi.\nSavollar faylini yuboring "
-        "(TXT yoki DOCX, klassik `? = +` format, 20 MB gacha).",
-        reply_markup=CANCEL_KB,
-    )
-
-
-@router.message(Mode.parser_waiting, F.text == BTN_CANCEL)
-@router.message(Mode.resolver_waiting, F.text == BTN_CANCEL)
+@router.message(Mode.test_waiting, F.text == BTN_CANCEL)
 @router.message(Mode.adding_user, F.text == BTN_CANCEL)
 async def cancel_waiting(message: Message, state: FSMContext, bot_settings: BotSettings) -> None:
     await state.clear()
@@ -374,10 +374,10 @@ async def managing_users_fallback(message: Message, allowed_users: AllowedUsersS
     )
 
 
-# ── Parser flow ─────────────────────────────────────────────────────────────
+# ── Test flow: parse, then optionally AI-resolve on the same result ────────
 
-@router.message(Mode.parser_waiting, F.document)
-async def handle_parser_file(
+@router.message(Mode.test_waiting, F.document)
+async def handle_test_file(
     message: Message, state: FSMContext, bot: Bot, bot_settings: BotSettings
 ) -> None:
     doc = message.document
@@ -393,7 +393,7 @@ async def handle_parser_file(
         return
 
     is_admin = message.from_user.id == bot_settings.admin_id
-    _busy_chats[message.chat.id] = "Parser"
+    _busy_chats[message.chat.id] = "Tahlil"
     try:
         status = await send_status_and_restore_menu(
             message, "⏳ Tahlil qilinmoqda…", main_keyboard(is_admin)
@@ -425,40 +425,45 @@ async def handle_parser_file(
 
         base = doc.file_name.rsplit(".", 1)[0]
         _results[message.chat.id] = CachedResult("parser", base, questions=result.questions)
+        has_unresolved = any(q.c == -1 for q in result.questions)
         await status.edit_text(
             format_parser_summary(doc.file_name, result, extra_warnings=extra),
-            reply_markup=export_keyboard("parser"),
+            reply_markup=parser_result_keyboard(has_unresolved),
         )
     finally:
         _busy_chats.pop(message.chat.id, None)
 
 
-# ── Resolver flow ───────────────────────────────────────────────────────────
+# ── AI-resolve: triggered by the "🤖 To'g'ri javobni aniqlash" button on an ──
+# ── already-parsed result, using the cached questions — no re-upload needed ──
 
-@router.message(Mode.resolver_waiting, F.document)
-async def handle_resolver_file(
-    message: Message, state: FSMContext, bot: Bot, bot_settings: BotSettings
-) -> None:
-    doc = message.document
-    ext = file_ext(doc.file_name)
-    if ext not in RESOLVER_EXTS:
-        await message.answer("❌ Faqat TXT yoki DOCX fayl yuboring.")
+@router.callback_query(F.data == "resolve:ai")
+async def handle_resolve_ai(cb: CallbackQuery, bot_settings: BotSettings) -> None:
+    if cb.message is None:
+        await cb.answer("Xabar eskirgan — yangi fayl yuboring.", show_alert=True)
         return
-    if doc.file_size and doc.file_size > MAX_FILE_BYTES:
-        await message.answer("❌ Fayl juda katta (20 MB dan oshmasligi kerak).")
+    chat_id = cb.message.chat.id
+    cached = _results.get(chat_id)
+    if cached is None or cached.kind != "parser" or not cached.questions:
+        await cb.answer("Natija topilmadi — yangi fayl yuboring.", show_alert=True)
         return
     if not bot_settings.anthropic_api_key:
-        await message.answer("❌ Serverda ANTHROPIC_API_KEY sozlanmagan.")
+        await cb.answer("❌ Serverda ANTHROPIC_API_KEY sozlanmagan.", show_alert=True)
         return
 
-    buf = await bot.download(doc)  # BytesIO when destination is omitted
-    content = buf.read()
+    await cb.answer()
+    is_admin = cb.from_user.id == bot_settings.admin_id
+    # Parser natijasidagi savollarni AI Resolver kutgan klassik `? = +`
+    # formatga aylantiramiz — allaqachon javobi belgilangan savollar `+`
+    # bilan chiqadi va Resolver ularni qayta yubormaydi (faqat `c == -1`
+    # bo'lganlar, ya'ni belgilanmaganlar, AI ga yuboriladi).
+    content = to_classic_txt(cached.questions).encode("utf-8")
+    base = cached.base_name
 
-    is_admin = message.from_user.id == bot_settings.admin_id
-    _busy_chats[message.chat.id] = "AI Resolver"
+    _busy_chats[chat_id] = "AI Resolver"
     try:
         status = await send_status_and_restore_menu(
-            message, "🤖 Savollar Batch API'ga yuborilmoqda…", main_keyboard(is_admin)
+            cb.message, "🤖 Savollar Batch API'ga yuborilmoqda…", main_keyboard(is_admin)
         )
         throttle = {"text": "", "t": 0.0}
         started = time.monotonic()
@@ -494,20 +499,19 @@ async def handle_resolver_file(
             use_batch=True,
         )
         try:
-            merge, stats = await pipeline.run(content, file_type=ext, progress_callback=progress)
+            merge, stats = await pipeline.run(content, file_type="txt", progress_callback=progress)
         except Exception as exc:
             log.exception("Resolver pipeline xatosi")
             await status.edit_text(f"❌ AI yechishda xato: {html.escape(str(exc))}")
             return
 
-        base = doc.file_name.rsplit(".", 1)[0]
-        _results[message.chat.id] = CachedResult("resolver", base, merge=merge)
+        _results[chat_id] = CachedResult("resolver", base, merge=merge)
         await status.edit_text(
-            format_resolver_summary(doc.file_name, merge, stats),
+            format_resolver_summary(base, merge, stats),
             reply_markup=export_keyboard("resolver"),
         )
     finally:
-        _busy_chats.pop(message.chat.id, None)
+        _busy_chats.pop(chat_id, None)
 
 
 # ── Export buttons ──────────────────────────────────────────────────────────
@@ -550,8 +554,7 @@ async def handle_export(cb: CallbackQuery) -> None:
 
 # ── Fallbacks ───────────────────────────────────────────────────────────────
 
-@router.message(Mode.parser_waiting)
-@router.message(Mode.resolver_waiting)
+@router.message(Mode.test_waiting)
 async def waiting_but_not_document(message: Message) -> None:
     await message.answer("📎 Iltimos, fayl (hujjat) sifatida yuboring.")
 
@@ -560,5 +563,5 @@ async def waiting_but_not_document(message: Message) -> None:
 async def no_mode_selected(message: Message, bot_settings: BotSettings) -> None:
     is_admin = message.from_user.id == bot_settings.admin_id
     await message.answer(
-        "Avval rejimni tanlang: 📝 Parser yoki 🤖 AI Resolver.", reply_markup=main_keyboard(is_admin)
+        f"Avval {BTN_TEST} tugmasini bosing.", reply_markup=main_keyboard(is_admin)
     )

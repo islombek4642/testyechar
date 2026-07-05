@@ -37,6 +37,10 @@ async def main() -> None:
     dp.message.outer_middleware(AccessMiddleware(allowed_users))
     dp.message.outer_middleware(BusyGuardMiddleware(is_chat_busy))
     dp.callback_query.outer_middleware(AccessMiddleware(allowed_users))
+    # "🤖 To'g'ri javobni aniqlash" endi callback orqali ishga tushadi
+    # (resolve:ai) va u ham uzoq davom etadi — busy-guard xabar tugmalarga
+    # ham tegishli bo'lishi kerak.
+    dp.callback_query.outer_middleware(BusyGuardMiddleware(is_chat_busy))
     dp.include_router(router)
 
     @dp.errors()

@@ -4,9 +4,9 @@ from bot.handlers import (
     MAIN_KB_ADMIN,
     file_ext,
     export_keyboard,
+    parser_result_keyboard,
     send_status_and_restore_menu,
     PARSER_EXTS,
-    RESOLVER_EXTS,
 )
 
 
@@ -19,7 +19,18 @@ def test_file_ext():
 
 def test_ext_sets():
     assert PARSER_EXTS == {"pdf", "docx", "doc", "xlsx", "txt"}
-    assert RESOLVER_EXTS == {"txt", "docx"}
+
+
+def test_parser_result_keyboard_hides_ai_button_when_fully_resolved():
+    kb = parser_result_keyboard(has_unresolved=False)
+    callback_data = [b.callback_data for row in kb.inline_keyboard for b in row]
+    assert callback_data == ["exp:parser:docx"]
+
+
+def test_parser_result_keyboard_shows_ai_button_when_unresolved_exist():
+    kb = parser_result_keyboard(has_unresolved=True)
+    callback_data = [b.callback_data for row in kb.inline_keyboard for b in row]
+    assert callback_data == ["exp:parser:docx", "resolve:ai"]
 
 
 def test_export_keyboard_callback_data():

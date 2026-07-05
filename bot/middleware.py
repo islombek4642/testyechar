@@ -27,7 +27,7 @@ class AccessMiddleware(BaseMiddleware):
 
 
 class BusyGuardMiddleware(BaseMiddleware):
-    """Blocks new messages in a chat while a Parser/Resolver job is running there."""
+    """Blocks new messages/callbacks in a chat while a test-solving job is running there."""
 
     def __init__(self, is_busy: Callable[[int], Optional[str]]) -> None:
         self.is_busy = is_busy
