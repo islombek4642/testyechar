@@ -48,13 +48,25 @@ BTN_CANCEL = "❌ Bekor qilish"
 BTN_SETTINGS = "⚙️ Sozlamalar"
 BTN_MANAGE_USERS = "👥 Foydalanuvchilar"
 
-MAIN_KB = ReplyKeyboardMarkup(
+MAIN_KB_USER = ReplyKeyboardMarkup(
+    keyboard=[[KeyboardButton(text=BTN_PARSER), KeyboardButton(text=BTN_RESOLVER)]],
+    resize_keyboard=True,
+)
+
+MAIN_KB_ADMIN = ReplyKeyboardMarkup(
     keyboard=[
         [KeyboardButton(text=BTN_PARSER), KeyboardButton(text=BTN_RESOLVER)],
         [KeyboardButton(text=BTN_SETTINGS)],
     ],
     resize_keyboard=True,
 )
+
+
+def main_keyboard(is_admin: bool) -> ReplyKeyboardMarkup:
+    """⚙️ Sozlamalar faqat adminga ko'rinadi — u model tanlovini barcha
+    foydalanuvchilar uchun global qilib belgilaydi."""
+    return MAIN_KB_ADMIN if is_admin else MAIN_KB_USER
+
 
 CANCEL_KB = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text=BTN_CANCEL)]],
@@ -95,9 +107,10 @@ class CachedResult:
 
 _results: dict[int, CachedResult] = {}
 
-# Har bir chat uchun tanlangan AI Resolver modeli (tanlanmagan bo'lsa
-# bot_settings.model standart qiymat sifatida ishlatiladi).
-_user_model: dict[int, str] = {}
+# Admin tanlagan AI Resolver modeli — GLOBAL, barcha foydalanuvchilar
+# uchun bir xil (tanlanmagan bo'lsa bot_settings.model standart qiymat
+# sifatida ishlatiladi).
+_active_model: Optional[str] = None
 
 # Sozlamalar xabarining message_id'si — model tanlanganda shu xabarni
 # tahrirlab, tanlov tasdiqlanganini ko'rsatish uchun.
@@ -129,8 +142,13 @@ def export_keyboard(kind: str) -> InlineKeyboardMarkup:
     )
 
 
-def get_selected_model(chat_id: int, default: str) -> str:
-    return _user_model.get(chat_id, default)
+def get_active_model(default: str) -> str:
+    return _active_model or default
+
+
+def set_active_model(model_id: str) -> None:
+    global _active_model
+    _active_model = model_id
 
 
 def settings_text(selected: str) -> str:
@@ -163,8 +181,10 @@ def manage_users_keyboard(ids: List[int]) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(inline_keyboard=rows)
 
 
-async def send_status_and_restore_menu(message: Message, status_text: str) -> Message:
-    """Restore MAIN_KB immediately, then send the freely-editable status message.
+async def send_status_and_restore_menu(
+    message: Message, status_text: str, menu_kb: ReplyKeyboardMarkup
+) -> Message:
+    """Restore the main menu immediately, then send the freely-editable status message.
 
     Telegram never lets you edit a message that was sent with a
     ReplyKeyboardMarkup, so the keyboard-restoring message can't be the
@@ -176,20 +196,21 @@ async def send_status_and_restore_menu(message: Message, status_text: str) -> Me
     without deleting: one extra short-lived-looking line in the chat,
     but the keyboard reliably comes back.
     """
-    await message.answer("📥 Fayl qabul qilindi.", reply_markup=MAIN_KB)
+    await message.answer("📥 Fayl qabul qilindi.", reply_markup=menu_kb)
     return await message.answer(status_text)
 
 
 # ── /start and mode selection ───────────────────────────────────────────────
 
 @router.message(CommandStart())
-async def cmd_start(message: Message, state: FSMContext) -> None:
+async def cmd_start(message: Message, state: FSMContext, bot_settings: BotSettings) -> None:
     await state.clear()
+    is_admin = message.from_user.id == bot_settings.admin_id
     await message.answer(
         "Assalomu alaykum! Rejimni tanlang:\n\n"
         f"{BTN_PARSER} — test faylini tahlil qilish (PDF, DOCX, DOC, XLSX, TXT)\n"
         f"{BTN_RESOLVER} — savollarga Claude AI yordamida javob topish (TXT, DOCX)",
-        reply_markup=MAIN_KB,
+        reply_markup=main_keyboard(is_admin),
     )
 
 
@@ -215,18 +236,23 @@ async def choose_resolver(message: Message, state: FSMContext) -> None:
 @router.message(Mode.parser_waiting, F.text == BTN_CANCEL)
 @router.message(Mode.resolver_waiting, F.text == BTN_CANCEL)
 @router.message(Mode.adding_user, F.text == BTN_CANCEL)
-async def cancel_waiting(message: Message, state: FSMContext) -> None:
+async def cancel_waiting(message: Message, state: FSMContext, bot_settings: BotSettings) -> None:
     await state.clear()
-    await message.answer("❌ Bekor qilindi.", reply_markup=MAIN_KB)
+    is_admin = message.from_user.id == bot_settings.admin_id
+    await message.answer("❌ Bekor qilindi.", reply_markup=main_keyboard(is_admin))
 
 
 @router.message(F.text == BTN_SETTINGS)
 async def show_settings(message: Message, state: FSMContext, bot_settings: BotSettings) -> None:
+    if message.from_user.id != bot_settings.admin_id:
+        # Tugma oddiy foydalanuvchiga ko'rinmaydi, lekin matnni qo'lda
+        # yozib yuborishi mumkin — shuning uchun bu yerda ham tekshiramiz.
+        await message.answer("⛔ Bu bo'lim faqat admin uchun.", reply_markup=main_keyboard(False))
+        return
     await state.set_state(Mode.choosing_model)
-    selected = get_selected_model(message.chat.id, bot_settings.model)
-    is_admin = message.from_user.id == bot_settings.admin_id
+    selected = get_active_model(bot_settings.model)
     sent = await message.answer(
-        settings_text(selected), reply_markup=settings_keyboard(selected, is_admin)
+        settings_text(selected), reply_markup=settings_keyboard(selected, is_admin=True)
     )
     _settings_msg_id[message.chat.id] = sent.message_id
 
@@ -240,7 +266,7 @@ async def show_manage_users(
 ) -> None:
     if message.from_user.id != bot_settings.admin_id:
         await state.clear()
-        await message.answer("⛔ Bu bo'lim faqat admin uchun.", reply_markup=MAIN_KB)
+        await message.answer("⛔ Bu bo'lim faqat admin uchun.", reply_markup=main_keyboard(False))
         return
     await state.set_state(Mode.managing_users)
     ids = allowed_users.list_ids()
@@ -252,15 +278,14 @@ async def handle_model_choice(message: Message, state: FSMContext, bot: Bot, bot
     text = (message.text or "").removeprefix("✅ ")
     model_id = _LABEL_TO_MODEL.get(text)
     if model_id is None:
-        selected = get_selected_model(message.chat.id, bot_settings.model)
-        is_admin = message.from_user.id == bot_settings.admin_id
+        selected = get_active_model(bot_settings.model)
         await message.answer(
             "Iltimos, quyidagi tugmalardan birini tanlang.",
-            reply_markup=settings_keyboard(selected, is_admin),
+            reply_markup=settings_keyboard(selected, is_admin=True),
         )
         return
 
-    _user_model[message.chat.id] = model_id
+    set_active_model(model_id)
     await state.clear()
 
     msg_id = _settings_msg_id.pop(message.chat.id, None)
@@ -269,12 +294,15 @@ async def handle_model_choice(message: Message, state: FSMContext, bot: Bot, bot
             await bot.edit_message_text(
                 chat_id=message.chat.id,
                 message_id=msg_id,
-                text=f"✅ Model tanlandi: <b>{MODEL_OPTIONS[model_id]}</b>",
+                text=(
+                    f"✅ Model tanlandi: <b>{MODEL_OPTIONS[model_id]}</b>\n"
+                    "(barcha foydalanuvchilar uchun amal qiladi)"
+                ),
             )
         except TelegramBadRequest:
             pass  # eski xabar tahrirlanmadi — foydalanuvchiga baribir tasdiq ko'rinadi
 
-    await message.answer("🏠 Bosh menyu", reply_markup=MAIN_KB)
+    await message.answer("🏠 Bosh menyu", reply_markup=main_keyboard(True))
 
 
 # ── Foydalanuvchilarni boshqarish (faqat admin) ─────────────────────────────
@@ -310,13 +338,14 @@ async def handle_add_user_text(
     user_id = int(text)
     added = allowed_users.add(user_id)
     await state.clear()
+    # Bu holatga faqat admin (prompt_add_user orqali) kirishi mumkin.
     if added:
         await message.answer(
-            f"✅ {user_id} ruxsat etilganlar ro'yxatiga qo'shildi.", reply_markup=MAIN_KB
+            f"✅ {user_id} ruxsat etilganlar ro'yxatiga qo'shildi.", reply_markup=main_keyboard(True)
         )
     else:
         await message.answer(
-            f"ℹ️ {user_id} allaqachon ruxsat etilgan (yoki u admin).", reply_markup=MAIN_KB
+            f"ℹ️ {user_id} allaqachon ruxsat etilgan (yoki u admin).", reply_markup=main_keyboard(True)
         )
 
 
@@ -349,19 +378,22 @@ async def handle_remove_user(
 async def handle_users_back(cb: CallbackQuery, state: FSMContext) -> None:
     await state.clear()
     if cb.message is not None:
-        # Bu xabarni keyin tahrirlash shart emas, shuning uchun
-        # send_status_and_restore_menu'dagi tashuvchi-xabar-yuborib-o'chirish
-        # hiylasi kerak emas — to'g'ridan-to'g'ri MAIN_KB bilan yuboriladi
+        # Bu holatga faqat admin kirishi mumkin (Foydalanuvchilar bo'limi
+        # admin-only). Bu xabarni keyin tahrirlash shart emas, shuning
+        # uchun send_status_and_restore_menu'dagi tashuvchi-xabar-yuborib-
+        # o'chirish hiylasi kerak emas — to'g'ridan-to'g'ri yuboriladi
         # (ba'zi Telegram klientlarida xabarni zudlik bilan o'chirish
         # klaviatura o'zgarishini ba'zan bekor qilib qo'yishi mumkin edi).
-        await cb.message.answer("🏠 Bosh menyu", reply_markup=MAIN_KB)
+        await cb.message.answer("🏠 Bosh menyu", reply_markup=main_keyboard(True))
     await cb.answer()
 
 
 # ── Parser flow ─────────────────────────────────────────────────────────────
 
 @router.message(Mode.parser_waiting, F.document)
-async def handle_parser_file(message: Message, state: FSMContext, bot: Bot) -> None:
+async def handle_parser_file(
+    message: Message, state: FSMContext, bot: Bot, bot_settings: BotSettings
+) -> None:
     doc = message.document
     ext = file_ext(doc.file_name)
     if ext not in PARSER_EXTS:
@@ -374,9 +406,12 @@ async def handle_parser_file(message: Message, state: FSMContext, bot: Bot) -> N
         await message.answer("❌ Fayl juda katta (20 MB dan oshmasligi kerak).")
         return
 
+    is_admin = message.from_user.id == bot_settings.admin_id
     _busy_chats[message.chat.id] = "Parser"
     try:
-        status = await send_status_and_restore_menu(message, "⏳ Tahlil qilinmoqda…")
+        status = await send_status_and_restore_menu(
+            message, "⏳ Tahlil qilinmoqda…", main_keyboard(is_admin)
+        )
         tmp_dir = core_settings.data_dir / "tmp"
         tmp_dir.mkdir(parents=True, exist_ok=True)
         # doc.file_name tashqaridan keladi — yo'l sifatida ishlatilmaydi,
@@ -433,9 +468,12 @@ async def handle_resolver_file(
     buf = await bot.download(doc)  # BytesIO when destination is omitted
     content = buf.read()
 
+    is_admin = message.from_user.id == bot_settings.admin_id
     _busy_chats[message.chat.id] = "AI Resolver"
     try:
-        status = await send_status_and_restore_menu(message, "🤖 Savollar Batch API'ga yuborilmoqda…")
+        status = await send_status_and_restore_menu(
+            message, "🤖 Savollar Batch API'ga yuborilmoqda…", main_keyboard(is_admin)
+        )
         throttle = {"text": "", "t": 0.0}
         started = time.monotonic()
 
@@ -463,7 +501,7 @@ async def handle_resolver_file(
                 # uchun) ilgari butun resolver ishini bekor qilib qo'ygan edi.
                 log.warning("Progress xabarini yangilab bo'lmadi, davom etilmoqda", exc_info=True)
 
-        selected_model = get_selected_model(message.chat.id, bot_settings.model)
+        selected_model = get_active_model(bot_settings.model)
         pipeline = AIResolverPipeline(
             api_key=bot_settings.anthropic_api_key,
             model=selected_model,
@@ -533,5 +571,8 @@ async def waiting_but_not_document(message: Message) -> None:
 
 
 @router.message()
-async def no_mode_selected(message: Message) -> None:
-    await message.answer("Avval rejimni tanlang: 📝 Parser yoki 🤖 AI Resolver.", reply_markup=MAIN_KB)
+async def no_mode_selected(message: Message, bot_settings: BotSettings) -> None:
+    is_admin = message.from_user.id == bot_settings.admin_id
+    await message.answer(
+        "Avval rejimni tanlang: 📝 Parser yoki 🤖 AI Resolver.", reply_markup=main_keyboard(is_admin)
+    )

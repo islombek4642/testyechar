@@ -1,9 +1,11 @@
 import asyncio
 
+import pytest
+
 from bot.allowed_users import AllowedUsersStore
 from bot.handlers import (
     MODEL_OPTIONS,
-    get_selected_model,
+    get_active_model,
     handle_add_user_text,
     handle_model_choice,
     handle_remove_user,
@@ -16,6 +18,17 @@ from bot.handlers import (
     show_settings,
 )
 from bot.states import Mode
+
+
+@pytest.fixture(autouse=True)
+def _reset_active_model():
+    """_active_model is a genuine module-level global (not keyed by chat),
+    so it must be reset between tests to avoid order-dependent leakage."""
+    from bot import handlers
+
+    handlers._active_model = None
+    yield
+    handlers._active_model = None
 
 
 class FakeChat:
@@ -117,12 +130,22 @@ def test_settings_keyboard_adds_manage_users_row_for_admin():
     assert len(texts) == 4
 
 
-def test_get_selected_model_falls_back_to_default():
-    assert get_selected_model(424242, "claude-opus-4-8") == "claude-opus-4-8"
+def test_get_active_model_falls_back_to_default():
+    assert get_active_model("claude-opus-4-8") == "claude-opus-4-8"
 
 
-def test_show_settings_switches_state_and_marks_current_model():
+def test_show_settings_denies_non_admin():
     message = FakeMessage(chat_id=111, user_id=999)  # not admin
+    state = FakeState()
+    settings = FakeSettings(model="claude-opus-4-8", admin_id=1)
+    asyncio.run(show_settings(message, state, settings))
+    assert state.set_to is None  # state never entered
+    text, markup = message.answers[0]
+    assert "faqat admin" in text.lower()
+
+
+def test_show_settings_switches_state_and_marks_current_model_for_admin():
+    message = FakeMessage(chat_id=111, user_id=1)  # admin
     state = FakeState()
     settings = FakeSettings(model="claude-opus-4-8", admin_id=1)
     asyncio.run(show_settings(message, state, settings))
@@ -130,52 +153,49 @@ def test_show_settings_switches_state_and_marks_current_model():
     text, markup = message.answers[0]
     assert "Claude Opus 4.8" in text
     button_texts = [row[0].text for row in markup.keyboard]
-    assert button_texts == ["✅ Claude Opus 4.8", "Claude Opus 4.7", "Claude Sonnet 5"]
+    assert button_texts == [
+        "✅ Claude Opus 4.8",
+        "Claude Opus 4.7",
+        "Claude Sonnet 5",
+        "👥 Foydalanuvchilar",
+    ]
 
 
-def test_show_settings_shows_manage_users_button_for_admin():
-    message = FakeMessage(chat_id=111, user_id=1)
-    state = FakeState()
-    settings = FakeSettings(model="claude-opus-4-8", admin_id=1)
-    asyncio.run(show_settings(message, state, settings))
-    _, markup = message.answers[0]
-    button_texts = [row[0].text for row in markup.keyboard]
-    assert "👥 Foydalanuvchilar" in button_texts
+def test_handle_model_choice_sets_global_model_edits_old_message_and_returns_to_menu():
+    from bot import handlers
 
-
-def test_handle_model_choice_stores_preference_edits_old_message_and_returns_to_menu():
-    message = FakeMessage(chat_id=222, user_id=222, text="Claude Opus 4.7")
+    message = FakeMessage(chat_id=222, user_id=1, text="Claude Opus 4.7")
     state = FakeState()
     bot = FakeBot()
     settings = FakeSettings(model="claude-opus-4-8", admin_id=1)
-    from bot import handlers
-
     handlers._settings_msg_id[222] = 555
 
     asyncio.run(handle_model_choice(message, state, bot, settings))
 
-    assert get_selected_model(222, "claude-opus-4-8") == "claude-opus-4-7"
+    # Global: any chat's resolver call now sees the admin's chosen model.
+    assert get_active_model("claude-opus-4-8") == "claude-opus-4-7"
     assert state.cleared
     assert 222 not in handlers._settings_msg_id
     chat_id, message_id, edited_text = bot.edits[0]
     assert (chat_id, message_id) == (222, 555)
     assert "Claude Opus 4.7" in edited_text
+    assert "barcha foydalanuvchilar" in edited_text.lower()
     text, markup = message.answers[0]
-    assert markup is handlers.MAIN_KB
+    assert markup is handlers.MAIN_KB_ADMIN
 
 
 def test_handle_model_choice_accepts_already_checked_label():
     # Re-tapping the currently-selected button sends its "✅ " prefixed text back.
-    message = FakeMessage(chat_id=223, user_id=223, text="✅ Claude Sonnet 5")
+    message = FakeMessage(chat_id=223, user_id=1, text="✅ Claude Sonnet 5")
     state = FakeState()
     bot = FakeBot()
     settings = FakeSettings(model="claude-opus-4-8", admin_id=1)
     asyncio.run(handle_model_choice(message, state, bot, settings))
-    assert get_selected_model(223, "claude-opus-4-8") == "claude-sonnet-5"
+    assert get_active_model("claude-opus-4-8") == "claude-sonnet-5"
 
 
 def test_handle_model_choice_unrecognized_text_reprompts():
-    message = FakeMessage(chat_id=333, user_id=333, text="random text")
+    message = FakeMessage(chat_id=333, user_id=1, text="random text")
     state = FakeState()
     bot = FakeBot()
     settings = FakeSettings(model="claude-opus-4-8", admin_id=1)
@@ -252,6 +272,8 @@ def test_prompt_add_user_sets_state_for_admin():
 
 
 def test_handle_add_user_text_valid_id(tmp_path):
+    from bot import handlers
+
     message = FakeMessage(chat_id=444, user_id=1, text="123456")
     state = FakeState()
     store = AllowedUsersStore(admin_id=1, path=tmp_path / "allowed.json")
@@ -260,6 +282,7 @@ def test_handle_add_user_text_valid_id(tmp_path):
     assert state.cleared
     text, markup = message.answers[0]
     assert "123456" in text
+    assert markup is handlers.MAIN_KB_ADMIN
 
 
 def test_handle_add_user_text_rejects_non_numeric(tmp_path):
@@ -296,7 +319,7 @@ def test_handle_remove_user_removes_and_edits_list(tmp_path):
     assert "222" in edited_text
 
 
-def test_handle_users_back_clears_state_and_restores_main_menu():
+def test_handle_users_back_clears_state_and_restores_admin_menu():
     from bot import handlers
 
     message = FakeMessage(chat_id=444, user_id=1)
@@ -306,4 +329,4 @@ def test_handle_users_back_clears_state_and_restores_main_menu():
     assert state.cleared
     assert len(message.answers) == 1
     text, markup = message.answers[0]
-    assert markup is handlers.MAIN_KB
+    assert markup is handlers.MAIN_KB_ADMIN

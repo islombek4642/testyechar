@@ -1,7 +1,7 @@
 import asyncio
 
 from bot.handlers import (
-    MAIN_KB,
+    MAIN_KB_ADMIN,
     file_ext,
     export_keyboard,
     send_status_and_restore_menu,
@@ -51,11 +51,13 @@ class _FakeMessage:
 def test_send_status_and_restore_menu_keeps_carrier_and_returns_status():
     message = _FakeMessage()
 
-    status = asyncio.run(send_status_and_restore_menu(message, "⏳ Tahlil qilinmoqda…"))
+    status = asyncio.run(
+        send_status_and_restore_menu(message, "⏳ Tahlil qilinmoqda…", MAIN_KB_ADMIN)
+    )
 
     assert len(message.answers) == 2
     carrier, returned_status = message.answers
-    assert carrier.reply_markup is MAIN_KB
+    assert carrier.reply_markup is MAIN_KB_ADMIN
     assert carrier.deleted is False  # endi o'chirilmaydi — ishonchlilik uchun
     assert returned_status is status
     assert status.text == "⏳ Tahlil qilinmoqda…"
