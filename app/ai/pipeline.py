@@ -41,7 +41,7 @@ class AIResolverPipeline:
     def __init__(
         self,
         api_key: str,
-        model: str = "claude-sonnet-4-6",
+        model: str = "claude-opus-4-8",
         use_batch: bool = False,
         chunk_size: int = 25,
     ) -> None:
@@ -164,11 +164,12 @@ class AIResolverPipeline:
                 await report_progress(msg, scaled_frac)
 
             poller = BatchPoller(api_key=self.api_key)
-            ai_answers = await poller.poll_until_complete(
+            ai_answers, batch_warnings = await poller.poll_until_complete(
                 batch_id=batch_id,
                 interval_seconds=10,
                 progress_callback=batch_progress_wrapper,
             )
+            warnings.extend(batch_warnings)
 
         else:
             # ── 4b. Standard API (Concurrent Requests) Mode ─────────────────

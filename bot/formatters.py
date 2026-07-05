@@ -57,6 +57,8 @@ def format_resolver_summary(
         f"🪙 Tokenlar (taxminiy): <b>{stats.estimated_total_tokens:,}</b>",
         f"💵 Taxminiy narx (Batch): <b>${stats.estimated_cost_batch_usd:.4f}</b>",
         f"⏱ Davomiylik: <b>{stats.duration_seconds:.0f} soniya</b>",
-        CHOOSE_FORMAT,
     ]
+    for w in stats.warnings:
+        lines.append(html.escape(w))
+    lines.append(CHOOSE_FORMAT)
     return "\n".join(lines)

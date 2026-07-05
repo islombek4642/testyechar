@@ -52,7 +52,7 @@ class BatchPoller:
         batch_id: str,
         interval_seconds: int = 10,
         progress_callback: Callable[[str, float], None] | Callable[[str, float], Awaitable[None]] | None = None,
-    ) -> List[AIAnswer]:
+    ) -> tuple[List[AIAnswer], List[str]]:
         """
         Poll the active batch job until it reaches a terminal status:
         - completed
@@ -96,14 +96,31 @@ class BatchPoller:
 
         # Retrieve and parse JSONL results
         resolved_answers: List[AIAnswer] = []
-        
+        refused_chunks = 0
+
         async for res in await self.client.beta.messages.batches.results(batch_id):
             # res is BetaMessageBatchIndividualResponse
             if res.result.type == "succeeded":
+                message = res.result.message
+
+                # Claude declined this chunk (safety classifier) — this is a
+                # normal "succeeded" API response, not a batch-level error, so
+                # it must be checked before treating content as JSON, otherwise
+                # it silently falls into the generic "JSON tahlil xatosi" path
+                # below with no indication of the real cause.
+                if message.stop_reason == "refusal":
+                    category = message.stop_details.category if message.stop_details else None
+                    log.warning(
+                        f"Chunk '{res.custom_id}' Claude tomonidan rad etildi "
+                        f"(xavfsizlik siyosati, turkum: {category})."
+                    )
+                    refused_chunks += 1
+                    continue
+
                 # Succeeded response — skip non-text blocks (e.g. ThinkingBlock,
                 # returned by default on models like Sonnet 5 with adaptive thinking on)
                 text_response = "".join(
-                    block.text for block in res.result.message.content if block.type == "text"
+                    block.text for block in message.content if block.type == "text"
                 ).strip()
                 cleaned_text = dummy_client._clean_json_response(text_response)
 
@@ -118,4 +135,11 @@ class BatchPoller:
                 # Failed request in batch
                 log.error(f"Batch elementi '{res.custom_id}' muvaffaqiyatsiz yakunlandi: {res.result.error}")
 
-        return resolved_answers
+        warnings: List[str] = []
+        if refused_chunks:
+            warnings.append(
+                f"⚠️ {refused_chunks} ta savollar bo'lagi Claude tomonidan xavfsizlik "
+                "siyosati tufayli rad etildi va yechilmadi."
+            )
+
+        return resolved_answers, warnings

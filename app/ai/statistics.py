@@ -15,12 +15,12 @@ from app.ai.confidence import ConfidenceTier
 from app.ai.merger import ResolvedQuestion
 
 
-# ── Claude pricing (USD per 1M tokens, as of 2024) ─────────────────────────
-# claude-3-5-sonnet-20241022
+# ── Claude pricing (USD per 1M tokens) — only the 3 models the bot's
+# Sozlamalar menu lets the admin choose from (bot/handlers.py MODEL_OPTIONS).
 PRICING = {
-    "claude-sonnet-4-6": {
-        "input_per_mtok": 3.00,
-        "output_per_mtok": 15.00,
+    "claude-opus-4-8": {
+        "input_per_mtok": 5.00,
+        "output_per_mtok": 25.00,
         "batch_discount": 0.50,
     },
     "claude-opus-4-7": {
@@ -28,34 +28,9 @@ PRICING = {
         "output_per_mtok": 25.00,
         "batch_discount": 0.50,
     },
-    "claude-opus-4-8": {
-        "input_per_mtok": 5.00,
-        "output_per_mtok": 25.00,
-        "batch_discount": 0.50,
-    },
     "claude-sonnet-5": {
         "input_per_mtok": 3.00,
         "output_per_mtok": 15.00,
-        "batch_discount": 0.50,
-    },
-    "claude-haiku-4-5": {
-        "input_per_mtok": 1.00,
-        "output_per_mtok": 5.00,
-        "batch_discount": 0.50,
-    },
-    "claude-3-5-sonnet-20241022": {
-        "input_per_mtok": 3.00,
-        "output_per_mtok": 15.00,
-        "batch_discount": 0.50,
-    },
-    "claude-3-opus-20240229": {
-        "input_per_mtok": 15.00,
-        "output_per_mtok": 75.00,
-        "batch_discount": 0.50,
-    },
-    "claude-3-5-haiku-20241022": {
-        "input_per_mtok": 0.80,
-        "output_per_mtok": 4.00,
         "batch_discount": 0.50,
     },
 }
@@ -98,7 +73,7 @@ class AIStatistics:
     chunk_size: int = 25
 
     # Model
-    model: str = "claude-3-5-sonnet-20241022"
+    model: str = "claude-opus-4-8"
     used_batch_api: bool = False
 
     # Any warnings
@@ -149,7 +124,7 @@ def compute_statistics(
     stats.estimated_total_tokens = stats.estimated_input_tokens + stats.estimated_output_tokens
 
     # ── Cost estimation ─────────────────────────────────────────────────
-    pricing = PRICING.get(model, PRICING["claude-3-5-sonnet-20241022"])
+    pricing = PRICING.get(model, PRICING["claude-opus-4-8"])
     in_cost = (stats.estimated_input_tokens / 1_000_000) * pricing["input_per_mtok"]
     out_cost = (stats.estimated_output_tokens / 1_000_000) * pricing["output_per_mtok"]
     standard_cost = in_cost + out_cost

@@ -22,7 +22,7 @@ class ClaudeBatchProcessor:
     Manages Message Batch API jobs with Claude.
     """
 
-    def __init__(self, api_key: str, model: str = "claude-3-5-sonnet-20241022") -> None:
+    def __init__(self, api_key: str, model: str = "claude-opus-4-8") -> None:
         self.api_key = api_key
         self.model = model
         self.client = AsyncAnthropic(

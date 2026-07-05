@@ -24,7 +24,7 @@ class AsyncClaudeClient:
     Client for standard, real-time Claude API requests with exponential backoff.
     """
 
-    def __init__(self, api_key: str, model: str = "claude-sonnet-4-6") -> None:
+    def __init__(self, api_key: str, model: str = "claude-opus-4-8") -> None:
         self.api_key = api_key
         self.model = model
         self.client = AsyncAnthropic(

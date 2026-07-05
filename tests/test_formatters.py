@@ -43,3 +43,17 @@ def test_resolver_summary_contains_key_details():
     text = format_resolver_summary("quiz.txt", merge, stats)
     for fragment in ("quiz.txt", "claude-opus-4-8", "30", "23", "18", "4", "0.0132"):
         assert fragment in text
+
+
+def test_resolver_summary_shows_warnings_when_present():
+    merge = MergeResult(
+        questions=[ResolvedQuestion(q="S?", o=["A"], c=0)],
+        total=10, already_resolved=0, ai_resolved=8, failed=2,
+    )
+    stats = AIStatistics(
+        total_questions=10, already_resolved=0, ai_resolved=8, failed=2,
+        model="claude-opus-4-8",
+        warnings=["⚠️ 1 ta savollar bo'lagi Claude tomonidan xavfsizlik siyosati tufayli rad etildi va yechilmadi."],
+    )
+    text = format_resolver_summary("quiz.txt", merge, stats)
+    assert "rad etildi" in text
