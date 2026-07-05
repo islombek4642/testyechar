@@ -47,6 +47,8 @@ BTN_RESOLVER = "🤖 AI Resolver"
 BTN_CANCEL = "❌ Bekor qilish"
 BTN_SETTINGS = "⚙️ Sozlamalar"
 BTN_MANAGE_USERS = "👥 Foydalanuvchilar"
+BTN_ADD_USER = "➕ Yangi qo'shish"
+BTN_BACK = "⬅️ Orqaga"
 
 MAIN_KB_USER = ReplyKeyboardMarkup(
     keyboard=[[KeyboardButton(text=BTN_PARSER), KeyboardButton(text=BTN_RESOLVER)]],
@@ -172,13 +174,11 @@ def manage_users_text(ids: List[int]) -> str:
     )
 
 
-def manage_users_keyboard(ids: List[int]) -> InlineKeyboardMarkup:
-    rows = [
-        [InlineKeyboardButton(text=f"❌ {uid}", callback_data=f"deluser:{uid}")] for uid in ids
-    ]
-    rows.append([InlineKeyboardButton(text="➕ Yangi qo'shish", callback_data="adduser:prompt")])
-    rows.append([InlineKeyboardButton(text="⬅️ Orqaga", callback_data="users:back")])
-    return InlineKeyboardMarkup(inline_keyboard=rows)
+def manage_users_keyboard(ids: List[int]) -> ReplyKeyboardMarkup:
+    rows = [[KeyboardButton(text=f"❌ {uid}")] for uid in ids]
+    rows.append([KeyboardButton(text=BTN_ADD_USER)])
+    rows.append([KeyboardButton(text=BTN_BACK)])
+    return ReplyKeyboardMarkup(keyboard=rows, resize_keyboard=True)
 
 
 async def send_status_and_restore_menu(
@@ -306,22 +306,18 @@ async def handle_model_choice(message: Message, state: FSMContext, bot: Bot, bot
 
 
 # ── Foydalanuvchilarni boshqarish (faqat admin) ─────────────────────────────
+# Mode.managing_users faqat show_manage_users orqali kirish mumkin, u allaqachon
+# admin-only tekshiruvdan o'tkazadi — shuning uchun quyidagi handlerlar buni
+# qayta tekshirmaydi (handle_model_choice bilan bir xil naqsh).
 
-@router.callback_query(F.data == "adduser:prompt")
-async def prompt_add_user(cb: CallbackQuery, state: FSMContext, bot_settings: BotSettings) -> None:
-    if cb.from_user.id != bot_settings.admin_id:
-        await cb.answer("⛔ Ruxsat yo'q.", show_alert=True)
-        return
-    if cb.message is None:
-        await cb.answer("Xabar eskirgan.", show_alert=True)
-        return
+@router.message(Mode.managing_users, F.text == BTN_ADD_USER)
+async def prompt_add_user(message: Message, state: FSMContext) -> None:
     await state.set_state(Mode.adding_user)
-    await cb.message.answer(
+    await message.answer(
         "Yangi foydalanuvchining Telegram ID raqamini yuboring "
         "(masalan, @userinfobot orqali oling):",
         reply_markup=CANCEL_KB,
     )
-    await cb.answer()
 
 
 @router.message(Mode.adding_user)
@@ -349,43 +345,33 @@ async def handle_add_user_text(
         )
 
 
-@router.callback_query(F.data.startswith("deluser:"))
-async def handle_remove_user(
-    cb: CallbackQuery, bot_settings: BotSettings, allowed_users: AllowedUsersStore
-) -> None:
-    if cb.from_user.id != bot_settings.admin_id:
-        await cb.answer("⛔ Ruxsat yo'q.", show_alert=True)
+@router.message(Mode.managing_users, F.text.startswith("❌ "))
+async def handle_remove_user(message: Message, allowed_users: AllowedUsersStore) -> None:
+    text = message.text.removeprefix("❌ ").strip()
+    if not text.isdigit():
         return
-    if cb.message is None:
-        await cb.answer("Xabar eskirgan.", show_alert=True)
-        return
-    try:
-        user_id = int(cb.data.split(":", 1)[1])
-    except ValueError:
-        await cb.answer("Noto'g'ri so'rov.", show_alert=True)
-        return
-
+    user_id = int(text)
     allowed_users.remove(user_id)
     ids = allowed_users.list_ids()
-    try:
-        await cb.message.edit_text(manage_users_text(ids), reply_markup=manage_users_keyboard(ids))
-    except TelegramBadRequest:
-        pass
-    await cb.answer(f"✅ {user_id} o'chirildi")
+    await message.answer(
+        f"✅ {user_id} o'chirildi.\n\n{manage_users_text(ids)}",
+        reply_markup=manage_users_keyboard(ids),
+    )
 
 
-@router.callback_query(F.data == "users:back")
-async def handle_users_back(cb: CallbackQuery, state: FSMContext) -> None:
+@router.message(Mode.managing_users, F.text == BTN_BACK)
+async def handle_users_back(message: Message, state: FSMContext) -> None:
     await state.clear()
-    if cb.message is not None:
-        # Bu holatga faqat admin kirishi mumkin (Foydalanuvchilar bo'limi
-        # admin-only). Bu xabarni keyin tahrirlash shart emas, shuning
-        # uchun send_status_and_restore_menu'dagi tashuvchi-xabar-yuborib-
-        # o'chirish hiylasi kerak emas — to'g'ridan-to'g'ri yuboriladi
-        # (ba'zi Telegram klientlarida xabarni zudlik bilan o'chirish
-        # klaviatura o'zgarishini ba'zan bekor qilib qo'yishi mumkin edi).
-        await cb.message.answer("🏠 Bosh menyu", reply_markup=main_keyboard(True))
-    await cb.answer()
+    await message.answer("🏠 Bosh menyu", reply_markup=main_keyboard(True))
+
+
+@router.message(Mode.managing_users)
+async def managing_users_fallback(message: Message, allowed_users: AllowedUsersStore) -> None:
+    ids = allowed_users.list_ids()
+    await message.answer(
+        "Iltimos, quyidagi tugmalardan birini tanlang.",
+        reply_markup=manage_users_keyboard(ids),
+    )
 
 
 # ── Parser flow ─────────────────────────────────────────────────────────────

@@ -4,6 +4,8 @@ import pytest
 
 from bot.allowed_users import AllowedUsersStore
 from bot.handlers import (
+    BTN_ADD_USER,
+    BTN_BACK,
     MODEL_OPTIONS,
     get_active_model,
     handle_add_user_text,
@@ -12,6 +14,7 @@ from bot.handlers import (
     handle_users_back,
     manage_users_keyboard,
     manage_users_text,
+    managing_users_fallback,
     prompt_add_user,
     settings_keyboard,
     show_manage_users,
@@ -93,17 +96,6 @@ class FakeBot:
 
     async def edit_message_text(self, chat_id, message_id, text, **kwargs):
         self.edits.append((chat_id, message_id, text))
-
-
-class FakeCallback:
-    def __init__(self, data, message, user_id):
-        self.data = data
-        self.message = message
-        self.from_user = FakeUser(user_id)
-        self.answers = []
-
-    async def answer(self, text=None, **kwargs):
-        self.answers.append(text)
 
 
 def test_model_options_has_three_models_in_order():
@@ -236,9 +228,9 @@ def test_show_manage_users_lists_ids_for_admin(tmp_path):
     assert state.set_to == Mode.managing_users
     text, markup = message.answers[0]
     assert "111" in text and "222" in text
-    callback_data = [row[0].callback_data for row in markup.inline_keyboard]
-    assert "deluser:111" in callback_data
-    assert "deluser:222" in callback_data
+    button_texts = [row[0].text for row in markup.keyboard]
+    assert "❌ 111" in button_texts
+    assert "❌ 222" in button_texts
 
 
 def test_manage_users_text_empty_list():
@@ -247,26 +239,16 @@ def test_manage_users_text_empty_list():
 
 def test_manage_users_keyboard_has_add_and_back_rows():
     kb = manage_users_keyboard([111])
-    callback_data = [row[0].callback_data for row in kb.inline_keyboard]
-    assert callback_data == ["deluser:111", "adduser:prompt", "users:back"]
+    button_texts = [row[0].text for row in kb.keyboard]
+    assert button_texts == ["❌ 111", BTN_ADD_USER, BTN_BACK]
 
 
-def test_prompt_add_user_denies_non_admin():
-    message = FakeMessage(chat_id=444, user_id=444)
-    cb = FakeCallback(data="adduser:prompt", message=message, user_id=999)
+def test_prompt_add_user_sets_state_and_shows_cancel_keyboard():
+    # Only reachable via show_manage_users, which already gates admin —
+    # no redundant admin check inside prompt_add_user itself.
+    message = FakeMessage(chat_id=444, user_id=1, text=BTN_ADD_USER)
     state = FakeState()
-    settings = FakeSettings(model="claude-opus-4-8", admin_id=1)
-    asyncio.run(prompt_add_user(cb, state, settings))
-    assert state.set_to is None
-    assert cb.answers[0] == "⛔ Ruxsat yo'q."
-
-
-def test_prompt_add_user_sets_state_for_admin():
-    message = FakeMessage(chat_id=444, user_id=1)
-    cb = FakeCallback(data="adduser:prompt", message=message, user_id=1)
-    state = FakeState()
-    settings = FakeSettings(model="claude-opus-4-8", admin_id=1)
-    asyncio.run(prompt_add_user(cb, state, settings))
+    asyncio.run(prompt_add_user(message, state))
     assert state.set_to == Mode.adding_user
     assert message.answers  # prompt text sent
 
@@ -294,39 +276,45 @@ def test_handle_add_user_text_rejects_non_numeric(tmp_path):
     assert store.list_ids() == []
 
 
-def test_handle_remove_user_denies_non_admin(tmp_path):
-    message = FakeMessage(chat_id=444, user_id=444)
-    cb = FakeCallback(data="deluser:111", message=message, user_id=999)
-    settings = FakeSettings(model="claude-opus-4-8", admin_id=1)
-    store = AllowedUsersStore(admin_id=1, path=tmp_path / "allowed.json", seed=[111])
-    asyncio.run(handle_remove_user(cb, settings, store))
-    assert store.is_allowed(111)  # unchanged
-    assert cb.answers[0] == "⛔ Ruxsat yo'q."
-
-
-def test_handle_remove_user_removes_and_edits_list(tmp_path):
-    sent = FakeSentMessage(1)
-    cb = FakeCallback(data="deluser:111", message=sent, user_id=1)
-    settings = FakeSettings(model="claude-opus-4-8", admin_id=1)
+def test_handle_remove_user_removes_and_shows_updated_list(tmp_path):
+    message = FakeMessage(chat_id=444, user_id=1, text="❌ 111")
     store = AllowedUsersStore(admin_id=1, path=tmp_path / "allowed.json", seed=[111, 222])
 
-    asyncio.run(handle_remove_user(cb, settings, store))
+    asyncio.run(handle_remove_user(message, store))
 
     assert not store.is_allowed(111)
     assert store.is_allowed(222)
-    edited_text, _ = sent.edits[0]
-    assert "111" not in edited_text
-    assert "222" in edited_text
+    text, markup = message.answers[0]
+    assert "111" in text and "o'chirildi" in text
+    assert "222" in text
+    button_texts = [row[0].text for row in markup.keyboard]
+    assert "❌ 111" not in button_texts
+    assert "❌ 222" in button_texts
+
+
+def test_handle_remove_user_ignores_non_numeric_suffix():
+    message = FakeMessage(chat_id=444, user_id=1, text="❌ not-a-number")
+    asyncio.run(handle_remove_user(message, allowed_users=None))
+    assert message.answers == []
 
 
 def test_handle_users_back_clears_state_and_restores_admin_menu():
     from bot import handlers
 
-    message = FakeMessage(chat_id=444, user_id=1)
-    cb = FakeCallback(data="users:back", message=message, user_id=1)
+    message = FakeMessage(chat_id=444, user_id=1, text=BTN_BACK)
     state = FakeState()
-    asyncio.run(handle_users_back(cb, state))
+    asyncio.run(handle_users_back(message, state))
     assert state.cleared
     assert len(message.answers) == 1
     text, markup = message.answers[0]
     assert markup is handlers.MAIN_KB_ADMIN
+
+
+def test_managing_users_fallback_reprompts_with_keyboard(tmp_path):
+    message = FakeMessage(chat_id=444, user_id=1, text="random text")
+    store = AllowedUsersStore(admin_id=1, path=tmp_path / "allowed.json", seed=[111])
+    asyncio.run(managing_users_fallback(message, store))
+    text, markup = message.answers[0]
+    button_texts = [row[0].text for row in markup.keyboard]
+    assert "❌ 111" in button_texts
+    assert BTN_ADD_USER in button_texts
