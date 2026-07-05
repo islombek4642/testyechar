@@ -29,13 +29,13 @@ def test_ext_sets():
 def test_parser_result_keyboard_hides_ai_button_when_fully_resolved():
     kb = parser_result_keyboard(has_unresolved=False)
     callback_data = [b.callback_data for row in kb.inline_keyboard for b in row]
-    assert callback_data == ["exp:parser:docx"]
+    assert callback_data == ["exp:parser"]
 
 
 def test_parser_result_keyboard_shows_ai_button_when_unresolved_exist():
     kb = parser_result_keyboard(has_unresolved=True)
     callback_data = [b.callback_data for row in kb.inline_keyboard for b in row]
-    assert callback_data == ["exp:parser:docx", "resolve:ai"]
+    assert callback_data == ["exp:parser", "resolve:ai"]
 
 
 def test_build_ai_raw_questions_marks_already_answered_option_correct():
@@ -73,9 +73,9 @@ def test_build_ai_raw_questions_missing_image_file_stays_none(tmp_path, monkeypa
 
 
 def test_export_keyboard_callback_data():
-    kb = export_keyboard("parser")
+    kb = export_keyboard("resolver")
     buttons = kb.inline_keyboard[0]
-    assert [b.callback_data for b in buttons] == ["exp:parser:txt", "exp:parser:docx"]
+    assert [b.callback_data for b in buttons] == ["exp:resolver"]
 
 
 class _FakeSentMessage:

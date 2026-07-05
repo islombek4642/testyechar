@@ -1,4 +1,4 @@
-"""Telegram handlers: /start, mode selection, file processing, TXT/DOCX export."""
+"""Telegram handlers: /start, mode selection, file processing, DOCX export."""
 from __future__ import annotations
 
 import asyncio
@@ -24,7 +24,6 @@ from aiogram.types import (
 
 from app.ai.docx_exporter import AIDocxExporter
 from app.ai.docx_parser import AIRawQuestion
-from app.ai.exporter import AIExporter
 from app.ai.merger import MergeResult
 from app.ai.pipeline import AIResolverPipeline
 from app.config import settings as core_settings
@@ -35,7 +34,6 @@ from app.parser import FormatType
 from app.utils.logger import get_logger
 
 from bot.allowed_users import AllowedUsersStore
-from bot.classic_txt import to_classic_txt
 from bot.config import BotSettings
 from bot.formatters import format_parser_summary, format_resolver_summary
 from bot.states import Mode
@@ -159,17 +157,14 @@ def build_ai_raw_questions(questions: List[ParsedQuestion]) -> List[AIRawQuestio
 
 def export_keyboard(kind: str) -> InlineKeyboardMarkup:
     return InlineKeyboardMarkup(
-        inline_keyboard=[[
-            InlineKeyboardButton(text="📄 TXT", callback_data=f"exp:{kind}:txt"),
-            InlineKeyboardButton(text="📖 DOCX", callback_data=f"exp:{kind}:docx"),
-        ]]
+        inline_keyboard=[[InlineKeyboardButton(text="📖 DOCX", callback_data=f"exp:{kind}")]]
     )
 
 
 def parser_result_keyboard(has_unresolved: bool) -> InlineKeyboardMarkup:
     """Tahlil natijasi tugmalari: DOCX yuklash har doim bepul va mavjud;
     AI bilan yechish tugmasi faqat javobsiz savol bo'lsa ko'rinadi (pullik)."""
-    rows = [[InlineKeyboardButton(text="📖 DOCX", callback_data="exp:parser:docx")]]
+    rows = [[InlineKeyboardButton(text="📖 DOCX", callback_data="exp:parser")]]
     if has_unresolved:
         rows.append(
             [InlineKeyboardButton(text="🤖 To'g'ri javobni aniqlash", callback_data="resolve:ai")]
@@ -543,7 +538,7 @@ async def handle_resolve_ai(cb: CallbackQuery, bot_settings: BotSettings) -> Non
 
 @router.callback_query(F.data.startswith("exp:"))
 async def handle_export(cb: CallbackQuery) -> None:
-    _, kind, fmt = cb.data.split(":")
+    _, kind = cb.data.split(":")
     if cb.message is None:
         await cb.answer("Xabar eskirgan — yangi fayl yuboring.", show_alert=True)
         return
@@ -554,19 +549,11 @@ async def handle_export(cb: CallbackQuery) -> None:
 
     try:
         if kind == "parser":
-            if fmt == "txt":
-                data = to_classic_txt(cached.questions).encode("utf-8")
-                name = f"{cached.base_name}_questions.txt"
-            else:
-                data = JSONExporter().to_docx_bytes(cached.questions)
-                name = f"{cached.base_name}_questions.docx"
+            data = JSONExporter().to_docx_bytes(cached.questions)
+            name = f"{cached.base_name}_questions.docx"
         else:
-            if fmt == "txt":
-                data = AIExporter().to_txt_string(cached.merge.questions).encode("utf-8")
-                name = f"{cached.base_name}_resolved.txt"
-            else:
-                name = f"{cached.base_name}_resolved.docx"
-                data = AIDocxExporter().export(cached.merge, name)
+            name = f"{cached.base_name}_resolved.docx"
+            data = AIDocxExporter().export(cached.merge, name)
 
         await cb.message.answer_document(BufferedInputFile(data, filename=name))
     except Exception:

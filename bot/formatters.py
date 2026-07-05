@@ -8,7 +8,7 @@ from app.ai.merger import MergeResult
 from app.ai.statistics import AIStatistics
 from app.core.pipeline import PipelineResult
 
-CHOOSE_FORMAT = "\n⬇️ Yuklab olish formatini tanlang:"
+CHOOSE_FORMAT = "\n⬇️ Natijani DOCX shaklida yuklab oling:"
 
 
 def format_parser_summary(
