@@ -52,7 +52,7 @@ class BatchPoller:
         batch_id: str,
         interval_seconds: int = 10,
         progress_callback: Callable[[str, float], None] | Callable[[str, float], Awaitable[None]] | None = None,
-    ) -> tuple[List[AIAnswer], List[str]]:
+    ) -> tuple[List[AIAnswer], List[str], int, int]:
         """
         Poll the active batch job until it reaches a terminal status:
         - completed
@@ -97,11 +97,17 @@ class BatchPoller:
         # Retrieve and parse JSONL results
         resolved_answers: List[AIAnswer] = []
         refused_chunks = 0
+        total_input_tokens = 0
+        total_output_tokens = 0
 
         async for res in await self.client.beta.messages.batches.results(batch_id):
             # res is BetaMessageBatchIndividualResponse
             if res.result.type == "succeeded":
                 message = res.result.message
+                # Real usage, billed regardless of whether the model went on
+                # to answer or refuse — counted here so cost reflects it too.
+                total_input_tokens += message.usage.input_tokens
+                total_output_tokens += message.usage.output_tokens
 
                 # Claude declined this chunk (safety classifier) — this is a
                 # normal "succeeded" API response, not a batch-level error, so
@@ -142,4 +148,4 @@ class BatchPoller:
                 "siyosati tufayli rad etildi va yechilmadi."
             )
 
-        return resolved_answers, warnings
+        return resolved_answers, warnings, total_input_tokens, total_output_tokens

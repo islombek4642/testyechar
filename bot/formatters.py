@@ -54,8 +54,8 @@ def format_resolver_summary(
         f"  🔴 MANUAL REVIEW: <b>{stats.manual_review_count}</b>",
         f"  O'rtacha ishonch: <b>{stats.average_confidence:.2f}</b>",
         "",
-        f"🪙 Tokenlar (taxminiy): <b>{stats.estimated_total_tokens:,}</b>",
-        f"💵 Taxminiy narx (Batch): <b>${stats.estimated_cost_batch_usd:.4f}</b>",
+        f"🪙 Tokenlar: <b>{stats.total_tokens:,}</b>",
+        f"💵 Narx (Batch): <b>${stats.cost_batch_usd:.4f}</b>",
         f"⏱ Davomiylik: <b>{stats.duration_seconds:.0f} soniya</b>",
     ]
     for w in stats.warnings:

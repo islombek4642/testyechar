@@ -39,7 +39,7 @@ class AsyncClaudeClient:
         max_retries: int = 5,
         initial_delay: float = 2.0,
         backoff_factor: float = 2.0,
-    ) -> List[AIAnswer]:
+    ) -> tuple[List[AIAnswer], int, int]:
         """
         Send a chunk of questions to Claude API and parse the resolved answers.
         Implements rigorous async retries and error handling.
@@ -98,13 +98,7 @@ class AsyncClaudeClient:
                 try:
                     parsed_json = json.loads(cleaned_text)
                     answer_list = AIAnswerList.model_validate(parsed_json)
-                    
-                    # Log tokens used to the answer objects for stats tracking
-                    for ans in answer_list.answers:
-                        # Distribute tokens across answers for granular tracking
-                        pass
-                        
-                    return answer_list.answers
+                    return answer_list.answers, input_tokens, output_tokens
 
                 except Exception as parse_err:
                     log.error(

@@ -1,8 +1,8 @@
 """
-AI Statistics & Cost Estimation.
+AI Statistics & Cost Calculation.
 
-Aggregates token usage, cost estimates (Standard vs Batch API),
-timing metrics, and confidence distributions.
+Aggregates real token usage (from Claude API response.usage), cost
+(Standard vs Batch API), timing metrics, and confidence distributions.
 """
 
 from __future__ import annotations
@@ -37,10 +37,6 @@ PRICING = {
     },
 }
 
-# Token estimation constants
-TOKENS_PER_QUESTION_INPUT = 120   # rough estimate per question incl. prompt overhead
-TOKENS_PER_QUESTION_OUTPUT = 20   # {"id":N,"c":X,"cf":Y}
-
 
 @dataclass
 class AIStatistics:
@@ -58,12 +54,13 @@ class AIStatistics:
     manual_review_count: int = 0
     average_confidence: float = 0.0
 
-    # Tokens & cost
-    estimated_input_tokens: int = 0
-    estimated_output_tokens: int = 0
-    estimated_total_tokens: int = 0
-    estimated_cost_standard_usd: float = 0.0
-    estimated_cost_batch_usd: float = 0.0
+    # Tokens & cost — real usage reported by the Claude API (response.usage),
+    # not a heuristic guess.
+    input_tokens: int = 0
+    output_tokens: int = 0
+    total_tokens: int = 0
+    cost_standard_usd: float = 0.0  # what this token count would cost via Standard API
+    cost_batch_usd: float = 0.0     # what it costs via Batch API (50% off) — the real bill when used_batch_api is True
 
     # Timing
     start_time: float = field(default_factory=time.perf_counter)
@@ -92,6 +89,8 @@ def compute_statistics(
     model: str,
     used_batch_api: bool,
     start_time: float,
+    input_tokens: int = 0,
+    output_tokens: int = 0,
     warnings: List[str] | None = None,
 ) -> AIStatistics:
     """Build a complete AIStatistics object from a resolved question list."""
@@ -119,19 +118,18 @@ def compute_statistics(
     if ai_qs:
         stats.average_confidence = round(sum(q.cf for q in ai_qs) / len(ai_qs), 3)
 
-    # ── Token estimation ────────────────────────────────────────────────
-    n = stats.sent_to_ai
-    stats.estimated_input_tokens = n * TOKENS_PER_QUESTION_INPUT
-    stats.estimated_output_tokens = n * TOKENS_PER_QUESTION_OUTPUT
-    stats.estimated_total_tokens = stats.estimated_input_tokens + stats.estimated_output_tokens
+    # ── Token usage (real, from Claude API response.usage) ──────────────
+    stats.input_tokens = input_tokens
+    stats.output_tokens = output_tokens
+    stats.total_tokens = input_tokens + output_tokens
 
-    # ── Cost estimation ─────────────────────────────────────────────────
+    # ── Cost ──────────────────────────────────────────────────────────
     pricing = PRICING.get(model, PRICING["claude-opus-4-8"])
-    in_cost = (stats.estimated_input_tokens / 1_000_000) * pricing["input_per_mtok"]
-    out_cost = (stats.estimated_output_tokens / 1_000_000) * pricing["output_per_mtok"]
+    in_cost = (stats.input_tokens / 1_000_000) * pricing["input_per_mtok"]
+    out_cost = (stats.output_tokens / 1_000_000) * pricing["output_per_mtok"]
     standard_cost = in_cost + out_cost
-    stats.estimated_cost_standard_usd = round(standard_cost, 6)
-    stats.estimated_cost_batch_usd = round(standard_cost * (1 - pricing["batch_discount"]), 6)
+    stats.cost_standard_usd = round(standard_cost, 6)
+    stats.cost_batch_usd = round(standard_cost * (1 - pricing["batch_discount"]), 6)
 
     # ── Timing ──────────────────────────────────────────────────────────
     stats.end_time = time.perf_counter()

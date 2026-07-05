@@ -36,8 +36,8 @@ def test_resolver_summary_contains_key_details():
     stats = AIStatistics(
         total_questions=30, already_resolved=5, ai_resolved=23, failed=2,
         trusted_count=18, warning_count=4, manual_review_count=1,
-        average_confidence=0.91, estimated_total_tokens=4200,
-        estimated_cost_batch_usd=0.0132, duration_seconds=95.0,
+        average_confidence=0.91, total_tokens=4200,
+        cost_batch_usd=0.0132, duration_seconds=95.0,
         model="claude-opus-4-8",
     )
     text = format_resolver_summary("quiz.txt", merge, stats)

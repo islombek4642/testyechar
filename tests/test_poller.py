@@ -14,11 +14,18 @@ class FakeStopDetails:
         self.category = category
 
 
+class FakeUsage:
+    def __init__(self, input_tokens=0, output_tokens=0):
+        self.input_tokens = input_tokens
+        self.output_tokens = output_tokens
+
+
 class FakeMessage:
-    def __init__(self, content, stop_reason="end_turn", stop_details=None):
+    def __init__(self, content, stop_reason="end_turn", stop_details=None, usage=None):
         self.content = content
         self.stop_reason = stop_reason
         self.stop_details = stop_details
+        self.usage = usage or FakeUsage()
 
 
 class FakeResult:
@@ -83,17 +90,24 @@ def test_poll_until_complete_returns_answers_and_no_warnings_when_all_succeed():
             "chunk-1",
             FakeResult(
                 "succeeded",
-                FakeMessage(content=[FakeTextBlock('{"answers": [{"id": 1, "c": 0, "cf": 0.9}]}')]),
+                FakeMessage(
+                    content=[FakeTextBlock('{"answers": [{"id": 1, "c": 0, "cf": 0.9}]}')],
+                    usage=FakeUsage(input_tokens=500, output_tokens=50),
+                ),
             ),
         ),
     ]
     poller = _poller_with(batch, results)
 
-    answers, warnings = asyncio.run(poller.poll_until_complete("batch-1", interval_seconds=0))
+    answers, warnings, input_tokens, output_tokens = asyncio.run(
+        poller.poll_until_complete("batch-1", interval_seconds=0)
+    )
 
     assert len(answers) == 1
     assert answers[0].id == 1
     assert warnings == []
+    assert input_tokens == 500
+    assert output_tokens == 50
 
 
 def test_poll_until_complete_reports_refusal_as_warning_not_parse_error():
@@ -103,23 +117,36 @@ def test_poll_until_complete_reports_refusal_as_warning_not_parse_error():
             "chunk-1",
             FakeResult(
                 "succeeded",
-                FakeMessage(content=[FakeTextBlock('{"answers": [{"id": 1, "c": 0, "cf": 0.9}]}')]),
+                FakeMessage(
+                    content=[FakeTextBlock('{"answers": [{"id": 1, "c": 0, "cf": 0.9}]}')],
+                    usage=FakeUsage(input_tokens=500, output_tokens=50),
+                ),
             ),
         ),
         FakeIndividualResponse(
             "chunk-2",
             FakeResult(
                 "succeeded",
-                FakeMessage(content=[], stop_reason="refusal", stop_details=FakeStopDetails("dangerous_content")),
+                FakeMessage(
+                    content=[],
+                    stop_reason="refusal",
+                    stop_details=FakeStopDetails("dangerous_content"),
+                    usage=FakeUsage(input_tokens=300, output_tokens=5),
+                ),
             ),
         ),
         FakeIndividualResponse("chunk-3", FakeResult("errored", error="boom")),
     ]
     poller = _poller_with(batch, results)
 
-    answers, warnings = asyncio.run(poller.poll_until_complete("batch-1", interval_seconds=0))
+    answers, warnings, input_tokens, output_tokens = asyncio.run(
+        poller.poll_until_complete("batch-1", interval_seconds=0)
+    )
 
     assert len(answers) == 1  # only chunk-1 contributes answers
     assert len(warnings) == 1
     assert "rad etildi" in warnings[0]
     assert "1 ta" in warnings[0]  # exactly the refused chunk, not the errored one
+    # Refused chunk's usage still counts (Anthropic bills it) — errored chunk's doesn't.
+    assert input_tokens == 800
+    assert output_tokens == 55

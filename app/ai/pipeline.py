@@ -128,6 +128,8 @@ class AIResolverPipeline:
                 model=self.model,
                 used_batch_api=self.use_batch,
                 start_time=start_time,
+                input_tokens=0,
+                output_tokens=0,
                 warnings=merge_result.merge_warnings,
             )
             return merge_result, stats
@@ -164,7 +166,7 @@ class AIResolverPipeline:
                 await report_progress(msg, scaled_frac)
 
             poller = BatchPoller(api_key=self.api_key)
-            ai_answers, batch_warnings = await poller.poll_until_complete(
+            ai_answers, batch_warnings, actual_input_tokens, actual_output_tokens = await poller.poll_until_complete(
                 batch_id=batch_id,
                 interval_seconds=10,
                 progress_callback=batch_progress_wrapper,
@@ -175,32 +177,36 @@ class AIResolverPipeline:
             # ── 4b. Standard API (Concurrent Requests) Mode ─────────────────
             await report_progress("Standard API so'rovlari boshlanmoqda…", 0.20)
             client = AsyncClaudeClient(api_key=self.api_key, model=self.model)
-            
+
             completed_chunks = 0
+            actual_input_tokens = 0
+            actual_output_tokens = 0
             semaphore = asyncio.Semaphore(3)  # Maximum 3 concurrent requests to avoid rate limits
 
-            async def process_chunk_with_sem(chunk: List[Dict[str, Any]], chunk_idx: int) -> List[AIAnswer]:
+            async def process_chunk_with_sem(chunk: List[Dict[str, Any]], chunk_idx: int) -> tuple[List[AIAnswer], int, int]:
                 nonlocal completed_chunks
                 async with semaphore:
                     try:
-                        res = await client.resolve_chunk(chunk)
+                        res, in_tok, out_tok = await client.resolve_chunk(chunk)
                         completed_chunks += 1
                         fraction = 0.20 + (completed_chunks / chunk_count) * 0.70
                         await report_progress(
                             f"Claude so'rovlari: {completed_chunks}/{chunk_count} chunk bajarildi",
                             fraction
                         )
-                        return res
+                        return res, in_tok, out_tok
                     except Exception as e:
                         log.error(f"Chunk-{chunk_idx} yechishda xatolik: {e}")
                         # Return empty lists or placeholders to continue gracefully
                         warnings.append(f"{chunk_idx}-blokni yechishda xatolik yuz berdi: {e}")
-                        return []
+                        return [], 0, 0
 
             tasks = [process_chunk_with_sem(chunk, idx) for idx, chunk in enumerate(chunks, start=1)]
             results = await asyncio.gather(*tasks)
-            for res_list in results:
+            for res_list, in_tok, out_tok in results:
                 ai_answers.extend(res_list)
+                actual_input_tokens += in_tok
+                actual_output_tokens += out_tok
 
         # ── 5. Merge answers ────────────────────────────────────────────────
         await report_progress("Natijalar asl ro'yxatga birlashtirilmoqda…", 0.92)
@@ -228,6 +234,8 @@ class AIResolverPipeline:
             model=self.model,
             used_batch_api=self.use_batch,
             start_time=start_time,
+            input_tokens=actual_input_tokens,
+            output_tokens=actual_output_tokens,
             warnings=merge_result.merge_warnings,
         )
 
@@ -270,7 +278,7 @@ class AIResolverPipeline:
                 failed=merge_result.failed,
                 chunk_count=0, chunk_size=self.chunk_size,
                 model=self.model, used_batch_api=False,
-                start_time=start_time, warnings=[],
+                start_time=start_time, input_tokens=0, output_tokens=0, warnings=[],
             )
             return merge_result, stats
 
@@ -297,29 +305,33 @@ class AIResolverPipeline:
         ai_answers: List[AIAnswer] = []
 
         completed_chunks = 0
+        actual_input_tokens = 0
+        actual_output_tokens = 0
         semaphore = asyncio.Semaphore(3)
 
-        async def process_chunk_with_sem(chunk: List[Dict[str, Any]], chunk_idx: int) -> List[AIAnswer]:
+        async def process_chunk_with_sem(chunk: List[Dict[str, Any]], chunk_idx: int) -> tuple[List[AIAnswer], int, int]:
             nonlocal completed_chunks
             async with semaphore:
                 try:
-                    res = await client.resolve_chunk(chunk)
+                    res, in_tok, out_tok = await client.resolve_chunk(chunk)
                     completed_chunks += 1
                     fraction = 0.15 + (completed_chunks / chunk_count) * 0.70
                     await report_progress(
                         f"Qayta yechish: {completed_chunks}/{chunk_count} chunk bajarildi",
                         fraction,
                     )
-                    return res
+                    return res, in_tok, out_tok
                 except Exception as e:
                     log.error(f"Retry chunk-{chunk_idx} xatoligi: {e}")
                     warnings.append(f"Qayta yechish: {chunk_idx}-blokda xatolik: {e}")
-                    return []
+                    return [], 0, 0
 
         tasks = [process_chunk_with_sem(c, i) for i, c in enumerate(chunks, start=1)]
         results = await asyncio.gather(*tasks)
-        for res_list in results:
+        for res_list, in_tok, out_tok in results:
             ai_answers.extend(res_list)
+            actual_input_tokens += in_tok
+            actual_output_tokens += out_tok
 
         await report_progress("Natijalar yangilanmoqda…", 0.90)
 
@@ -355,6 +367,8 @@ class AIResolverPipeline:
             chunk_count=chunk_count, chunk_size=self.chunk_size,
             model=self.model, used_batch_api=False,
             start_time=start_time,
+            input_tokens=actual_input_tokens,
+            output_tokens=actual_output_tokens,
             warnings=merge_result.merge_warnings + warnings,
         )
 
