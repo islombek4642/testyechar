@@ -438,15 +438,11 @@ async def handle_test_file(
             )
             return
 
-        extra = []
-        if ext == "doc":
-            extra.append(".doc fayl zaxira usulda o'qildi — sifat pastroq bo'lishi mumkin.")
-
         base = doc.file_name.rsplit(".", 1)[0]
         _results[message.chat.id] = CachedResult("parser", base, questions=result.questions)
         has_unresolved = any(q.c == -1 for q in result.questions)
         await status.edit_text(
-            format_parser_summary(doc.file_name, result, extra_warnings=extra),
+            format_parser_summary(doc.file_name, result),
             reply_markup=parser_result_keyboard(has_unresolved),
         )
     finally:
