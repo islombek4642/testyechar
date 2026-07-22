@@ -78,14 +78,19 @@ class ABCParser:
                     self._start_new_question("")
                 self._add_option(option_text, is_correct=True)
             elif n_match:
-                # Normal option match — check if text starts with # (correct answer marker)
+                # Normal option match — correct answer can be marked with a
+                # leading "#" or a trailing "*" (e.g. "C) Avitaminoz*").
                 option_text = n_match.group(2)
                 if self._current is None:
                     self._start_new_question("")
+                is_correct = False
                 if option_text.startswith("#"):
-                    self._add_option(option_text.lstrip("#").strip(), is_correct=True)
-                else:
-                    self._add_option(option_text, is_correct=False)
+                    option_text = option_text[1:].strip()
+                    is_correct = True
+                if option_text.rstrip().endswith("*"):
+                    option_text = option_text.rstrip()[:-1].rstrip()
+                    is_correct = True
+                self._add_option(option_text, is_correct=is_correct)
             elif (stripped.startswith("+ ") or stripped.startswith("* ")) and self._current is not None:
                 self._add_option(stripped[2:].strip(), is_correct=True)
             elif stripped.startswith("= ") and self._current is not None:
