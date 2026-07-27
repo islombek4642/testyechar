@@ -86,6 +86,16 @@ class AsyncClaudeClient:
                     f"Kirish={input_tokens}, Chiqish={output_tokens}"
                 )
 
+                # Ground-truth diagnostic: count actual server-side web_search
+                # invocations from the API response itself (not Claude's
+                # self-reported "s" flag in the JSON), so deploy/behavior can
+                # be verified from the container logs directly.
+                search_uses = sum(
+                    1 for block in response.content
+                    if block.type == "server_tool_use" and getattr(block, "name", None) == "web_search"
+                )
+                log.info(f"Ushbu chunkda web_search {search_uses} marta ishlatildi.")
+
                 # Extract response text — skip non-text blocks (e.g. ThinkingBlock,
                 # returned by default on models like Sonnet 5 with adaptive thinking on)
                 text_response = "".join(

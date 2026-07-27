@@ -99,6 +99,7 @@ class BatchPoller:
         refused_chunks = 0
         total_input_tokens = 0
         total_output_tokens = 0
+        total_search_uses = 0
 
         async for res in await self.client.beta.messages.batches.results(batch_id):
             # res is BetaMessageBatchIndividualResponse
@@ -123,6 +124,18 @@ class BatchPoller:
                     refused_chunks += 1
                     continue
 
+                # Ground-truth diagnostic: count actual server-side web_search
+                # invocations from the API response itself (not Claude's
+                # self-reported "s" flag in the JSON), so deploy/behavior can
+                # be verified from the container logs directly.
+                chunk_search_uses = sum(
+                    1 for block in message.content
+                    if block.type == "server_tool_use" and getattr(block, "name", None) == "web_search"
+                )
+                total_search_uses += chunk_search_uses
+                if chunk_search_uses:
+                    log.info(f"Chunk '{res.custom_id}': web_search {chunk_search_uses} marta ishlatildi.")
+
                 # Succeeded response — skip non-text blocks (e.g. ThinkingBlock,
                 # returned by default on models like Sonnet 5 with adaptive thinking on)
                 text_response = "".join(
@@ -140,6 +153,8 @@ class BatchPoller:
             else:
                 # Failed request in batch
                 log.error(f"Batch elementi '{res.custom_id}' muvaffaqiyatsiz yakunlandi: {res.result.error}")
+
+        log.info(f"Batch {batch_id} yakunlandi. Jami web_search chaqiruvlari: {total_search_uses}")
 
         warnings: List[str] = []
         if refused_chunks:
