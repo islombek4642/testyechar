@@ -35,10 +35,13 @@ RESPONSE SCHEMA:
 
 # Server-side web search tool: Claude decides when to search; Anthropic executes
 # the search and returns results in-turn. No domain restriction.
+# max_uses is a per-request cap shared across every question in the chunk
+# (default chunk_size is 25 — see QuestionChunker) — kept >= chunk_size so a
+# single question is never starved of a search by an earlier one in the batch.
 WEB_SEARCH_TOOL: Dict[str, Any] = {
     "type": "web_search_20260209",
     "name": "web_search",
-    "max_uses": 3,
+    "max_uses": 25,
 }
 
 def make_user_prompt(questions_json: str) -> str:
