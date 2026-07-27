@@ -15,6 +15,7 @@ For each question:
 1. Identify the semantically correct answer option.
 2. If the question depends on a specific fact you are not confident about from memory (e.g. an exact law, decree, or resolution date/number), use the web_search tool to verify it before answering.
 3. Estimate your confidence score (cf) as a float between 0.00 and 1.00 (e.g., 0.95).
+4. Set "s" to true if you used the web_search tool to verify the answer to THIS specific question, false otherwise.
 
 OUTPUT RULES:
 - Output strictly pure JSON conforming to the requested schema.
@@ -28,7 +29,8 @@ RESPONSE SCHEMA:
     {
       "id": <int matching question id>,
       "c": <int index of correct option (0-based)>,
-      "cf": <float confidence score between 0.0 and 1.0>
+      "cf": <float confidence score between 0.0 and 1.0>,
+      "s": <bool, true if web_search was used for this question>
     }
   ]
 }"""

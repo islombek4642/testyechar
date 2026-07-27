@@ -370,6 +370,7 @@ class AIResolverPipeline:
                 merge_result.questions[orig_idx] = ResolvedQuestion(
                     q=old_q.q, o=list(old_q.o), c=ai_answer.c,
                     cf=ai_answer.cf, source="ai", tier=tier.value,
+                    searched=ai_answer.s,
                 )
                 retry_resolved += 1
             else:

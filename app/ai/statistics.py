@@ -53,6 +53,7 @@ class AIStatistics:
     warning_count: int = 0
     manual_review_count: int = 0
     average_confidence: float = 0.0
+    searched_count: int = 0  # questions Claude verified via web_search
 
     # Tokens & cost — real usage reported by the Claude API (response.usage),
     # not a heuristic guess.
@@ -117,6 +118,7 @@ def compute_statistics(
 
     if ai_qs:
         stats.average_confidence = round(sum(q.cf for q in ai_qs) / len(ai_qs), 3)
+    stats.searched_count = sum(1 for q in ai_qs if q.searched)
 
     # ── Token usage (real, from Claude API response.usage) ──────────────
     stats.input_tokens = input_tokens

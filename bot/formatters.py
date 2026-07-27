@@ -43,5 +43,7 @@ def format_resolver_summary(filename: str, merge: MergeResult, stats: AIStatisti
     ]
     if merge.images:
         lines.append(f"🖼 Rasmli savollar: <b>{len(merge.images)}</b>")
+    if stats.searched_count:
+        lines.append(f"🌐 Internetdan tekshirilgan: <b>{stats.searched_count}</b>")
     lines.append(f"⏱ Davomiylik: <b>{stats.duration_seconds:.0f} soniya</b>")
     return "\n".join(lines)

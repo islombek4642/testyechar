@@ -18,6 +18,7 @@ class AIAnswer(BaseModel):
     id: int = Field(description="The index/ID of the question mapped back from the input.")
     c: int = Field(description="The 0-based index of the resolved correct option, or -1 if unresolved.")
     cf: float = Field(default=0.0, description="The estimated confidence score (0.00 to 1.00).")
+    s: bool = Field(default=False, description="Whether the web_search tool was used to verify this specific question.")
 
     @field_validator("cf")
     @classmethod

@@ -28,6 +28,7 @@ class ResolvedQuestion(BaseModel):
     cf: float = Field(default=1.0, description="Confidence: 1.0 for manual, AI score otherwise")
     source: str = Field(default="manual", description="'manual' or 'ai'")
     tier: str = Field(default="TRUSTED", description="Confidence tier label")
+    searched: bool = Field(default=False, description="Whether web_search was used to resolve this question")
 
 
 class MergeResult(BaseModel):
@@ -117,6 +118,7 @@ class AnswerMerger:
                             cf=ai_answer.cf,
                             source="ai",
                             tier=tier.value,
+                            searched=ai_answer.s,
                         )
                         result.questions.append(rq)
                         result.ai_resolved += 1
