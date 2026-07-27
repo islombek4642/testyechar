@@ -13,12 +13,13 @@ CLAUDE_SYSTEM_PROMPT = """You are a rigorous academic assessment system. Your ta
 
 For each question:
 1. Identify the semantically correct answer option.
-2. Estimate your confidence score (cf) as a float between 0.00 and 1.00 (e.g., 0.95).
+2. If the question depends on a specific fact you are not confident about from memory (e.g. an exact law, decree, or resolution date/number), use the web_search tool to verify it before answering.
+3. Estimate your confidence score (cf) as a float between 0.00 and 1.00 (e.g., 0.95).
 
 OUTPUT RULES:
 - Output strictly pure JSON conforming to the requested schema.
 - Do NOT wrap the JSON inside markdown code blocks (e.g., do NOT use ```json ... ```).
-- Do NOT output any conversational text, pleasantries, preambles, or explanations.
+- Do NOT output any conversational text, pleasantries, preambles, or explanations — this applies even after using web_search; your final message must still contain only the JSON.
 - If you cannot determine the answer, set "c" to -1 and "cf" to 0.00.
 
 RESPONSE SCHEMA:
@@ -31,6 +32,17 @@ RESPONSE SCHEMA:
     }
   ]
 }"""
+
+# Server-side web search tool: Claude decides when to search; Anthropic executes
+# the search and returns results in-turn. No domain restriction.
+# max_uses is a per-request cap shared across every question in the chunk
+# (default chunk_size is 25 — see QuestionChunker) — kept >= chunk_size so a
+# single question is never starved of a search by an earlier one in the batch.
+WEB_SEARCH_TOOL: Dict[str, Any] = {
+    "type": "web_search_20260209",
+    "name": "web_search",
+    "max_uses": 25,
+}
 
 def make_user_prompt(questions_json: str) -> str:
     """

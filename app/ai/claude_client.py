@@ -12,7 +12,7 @@ from typing import Dict, Any, List, Optional
 
 import httpx
 from anthropic import AsyncAnthropic, APIError, RateLimitError, APIStatusError
-from app.ai.prompts import CLAUDE_SYSTEM_PROMPT, make_user_prompt, make_multimodal_content
+from app.ai.prompts import CLAUDE_SYSTEM_PROMPT, WEB_SEARCH_TOOL, make_user_prompt, make_multimodal_content
 from app.ai.validator import AIAnswer, AIAnswerList
 from app.utils.logger import get_logger
 
@@ -65,6 +65,7 @@ class AsyncClaudeClient:
                     "max_tokens": 4000,
                     "system": CLAUDE_SYSTEM_PROMPT,
                     "messages": [{"role": "user", "content": user_content}],
+                    "tools": [WEB_SEARCH_TOOL],
                 }
                 if "claude-3" in self.model.lower():
                     params["temperature"] = 0.0  # Strict, deterministic answers for older models
