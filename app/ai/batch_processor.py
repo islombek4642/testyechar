@@ -11,7 +11,7 @@ from typing import Dict, Any, List
 
 import httpx
 from anthropic import AsyncAnthropic, APIConnectionError, APITimeoutError
-from app.ai.prompts import CLAUDE_SYSTEM_PROMPT, make_user_prompt, make_multimodal_content
+from app.ai.prompts import CLAUDE_SYSTEM_PROMPT, WEB_SEARCH_TOOL, make_user_prompt, make_multimodal_content
 from app.utils.logger import get_logger
 
 log = get_logger(__name__)
@@ -51,6 +51,7 @@ class ClaudeBatchProcessor:
                 "max_tokens": 4000,
                 "system": CLAUDE_SYSTEM_PROMPT,
                 "messages": [{"role": "user", "content": user_content}],
+                "tools": [WEB_SEARCH_TOOL],
             }
             if "claude-3" in self.model.lower():
                 params["temperature"] = 0.0
