@@ -54,6 +54,13 @@ _NUM_ONLY_Q = re.compile(r'^[^\d\w]*\d+[.\s]*$', re.UNICODE)
 # Matches "? #A)option" — a ? line that is actually a correct option (typo in source).
 _Q_AS_CORRECT_OPT = re.compile(r'^[#*]\s*[a-fA-F][\.\)]\s*.+', re.UNICODE)
 
+# Matches an option whose own text is a numbered sub-list starting at "1."/"1)"
+# (e.g. an option spelled out as "1.Range A 2.Range B 3.Range C" across several
+# PDF lines, only the first of which carries the "="/"+" marker). When the
+# most recently added option starts this way, a later bare "2."/"3." line is
+# that option's continuation, not a new numbered question (see _NUMBERED_Q).
+_NUMBERED_LIST_OPT_START = re.compile(r'^1' + _Q_SEP + r'\s*\S', re.UNICODE)
+
 log = get_logger(__name__)
 
 
@@ -171,7 +178,17 @@ class ClassicParser:
                             self._mark_correct_by_letter(ca_m.group(1).upper())
                         else:
                             num_m = _NUMBERED_Q.match(stripped)
-                            if num_m and self._current is not None and self._current.options:
+                            last_opt_is_numbered_list = bool(
+                                self._current is not None
+                                and self._current.options
+                                and _NUMBERED_LIST_OPT_START.match(self._current.options[-1].text.strip())
+                            )
+                            if (
+                                num_m
+                                and self._current is not None
+                                and self._current.options
+                                and not last_opt_is_numbered_list
+                            ):
                                 self._flush_current()
                                 self._start_new_question(next(g for g in num_m.groups() if g is not None))
                             else:

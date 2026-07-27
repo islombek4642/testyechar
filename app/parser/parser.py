@@ -169,11 +169,30 @@ class QuestionParser:
         )
         return "\n".join(result)
 
-    # Matches an option-letter marker (A-F) + ) or . + space) embedded mid-line.
-    # Lookbehind ensures there is real content before it (not at line start).
-    _EMBEDDED_OPT_RE = re.compile(r'(?<=\S)\s+(?=[A-Fa-f][\.\)]\s)', re.UNICODE)
-    # Recognises lines that already start with an option or a numbered question.
-    _OPT_OR_Q_START  = re.compile(r'^(?:[A-Fa-f][\.\)]|\d+[\.\)])\s', re.UNICODE)
+    # Matches an option-letter marker (A-F) + ) or . + space) embedded mid-line,
+    # OR an embedded Classic marker ("+ text" / "= text") glued onto the same
+    # PDF row as the previous question/option.
+    #
+    # "+ " splits on any preceding content (a correct answer swallowed mid-line
+    # is the costlier failure — it silently drops the right answer — so this
+    # side is deliberately the looser one), but never when followed by a digit,
+    # so arithmetic like "5 + 3" inside an option's own text is left alone.
+    #
+    # "= " only splits after sentence-ending punctuation (". "/"! "/"? "), which
+    # is what distinguishes a genuine second option ("...bajarmaydi. = Otning
+    # ...") from "=" used as plain notation inside one option/question
+    # ("asos = so'z yasovchi = lug'aviy shakl yasovchi ...", a morpheme-formula
+    # description that must NOT be chopped into fragments).
+    _EMBEDDED_OPT_RE = re.compile(
+        r'(?<=\S)\s+(?=[A-Fa-f][\.\)]\s)'
+        r'|(?<=\S)\s+(?=\+\s(?!\d))'
+        r'|(?<=[.!?])\s+(?==\s(?!\d))',
+        re.UNICODE,
+    )
+    # Recognises lines that already start with an option, a numbered question,
+    # or a Classic-format marker (?/=/+). No required space after "="/"+"/"?" --
+    # some PDFs extract them glued directly onto the text ("=Barcha ...").
+    _OPT_OR_Q_START  = re.compile(r'^(?:[A-Fa-f][\.\)]|\d+[\.\)]|[=+?])', re.UNICODE)
 
     @classmethod
     def _split_merged_option_lines(cls, lines: List[str]) -> List[str]:
@@ -183,10 +202,13 @@ class QuestionParser:
         Handles:
           "A) text1 B) text2"        → ["A) text1",  "B) text2"]
           "1. Question A) option"    → ["1. Question", "A) option"]
+          "= wrong. + correct"       → ["= wrong.",   "+ correct"]
+          "?Question... + correct"   → ["?Question...", "+ correct"]
 
-        Only processes lines that start with an option letter (A-F) or a
-        numbered question, so prose text that happens to contain "B)"
-        mid-sentence is left untouched.
+        Only processes lines that already start with an option letter (A-F),
+        a numbered question, or a Classic marker (?/=/+), so prose text that
+        happens to contain "B)" or "+"/"=" mid-sentence elsewhere is left
+        untouched.
         """
         result: List[str] = []
         for line in lines:
