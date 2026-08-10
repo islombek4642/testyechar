@@ -3,7 +3,7 @@ from app.ai.statistics import AIStatistics
 from app.core.pipeline import PipelineResult
 from app.models.question import ParsedQuestion, ParsingStats
 
-from bot.formatters import format_parser_summary, format_resolver_summary
+from bot.formatters import format_duration, format_parser_summary, format_resolver_summary
 
 
 def _parser_result(questions=None, duration_seconds=4.2, removed_duplicates=None) -> PipelineResult:
@@ -72,9 +72,16 @@ def test_resolver_summary_shows_only_the_5_essentials():
     assert "Jami savollar" in text and "30" in text
     assert "Javobli" in text and "28" in text  # 30 - 2 failed
     assert "Javobsiz" in text and "2" in text
-    assert "95" in text
+    assert "1 daqiqa 35 soniya" in text  # 95s shown as minutes+seconds
     for hidden in ("claude-opus-4-8", "model", "token", "narx", "TRUSTED", "ishonch"):
         assert hidden not in text
+
+
+def test_format_duration_drops_leading_zero_units():
+    assert format_duration(30) == "30 soniya"
+    assert format_duration(90) == "1 daqiqa 30 soniya"
+    assert format_duration(3725) == "1 soat 2 daqiqa 5 soniya"
+    assert format_duration(3600) == "1 soat 0 daqiqa 0 soniya"
 
 
 def test_resolver_summary_shows_image_count_only_when_present():

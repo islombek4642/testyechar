@@ -14,6 +14,22 @@ from app.ai.statistics import AIStatistics
 from app.core.pipeline import PipelineResult
 
 
+def format_duration(seconds: float) -> str:
+    """Render a duration as '1 soat 5 daqiqa 30 soniya', dropping zero units
+    at the front (e.g. under a minute → '30 soniya', not '0 soat 0 daqiqa')."""
+    total = int(round(seconds))
+    hours, rem = divmod(total, 3600)
+    minutes, secs = divmod(rem, 60)
+
+    parts = []
+    if hours:
+        parts.append(f"{hours} soat")
+    if hours or minutes:
+        parts.append(f"{minutes} daqiqa")
+    parts.append(f"{secs} soniya")
+    return " ".join(parts)
+
+
 def format_parser_summary(filename: str, result: PipelineResult) -> str:
     questions = result.questions
     answered = sum(1 for q in questions if q.c != -1)
@@ -45,5 +61,5 @@ def format_resolver_summary(filename: str, merge: MergeResult, stats: AIStatisti
         lines.append(f"🖼 Rasmli savollar: <b>{len(merge.images)}</b>")
     if stats.searched_count:
         lines.append(f"🌐 Internetdan tekshirilgan: <b>{stats.searched_count}</b>")
-    lines.append(f"⏱ Davomiylik: <b>{stats.duration_seconds:.0f} soniya</b>")
+    lines.append(f"⏱ Davomiylik: <b>{format_duration(stats.duration_seconds)}</b>")
     return "\n".join(lines)
