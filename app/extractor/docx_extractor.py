@@ -478,14 +478,18 @@ class DOCXExtractor(BaseExtractor):
     #   inside abbreviations like "(LMA)" where M precedes A).
     # Pass 2 — lowercase a-d: split ONLY after punctuation (not after any letter/digit)
     #   so that "chiqishga)" or "(1938-yilda)" are NOT incorrectly split.
+    # Both also exclude a preceding "(" — "(a)"/"(b)" is a fully-bracketed
+    # parenthetical label (e.g. "Ikkinchi(a) va uchinchi(b) ...", referring to
+    # sub-parts named a/b), not the start of a new option; a real option
+    # marker is never itself wrapped in its own opening paren.
     _INLINE_OPT_UPPER = re.compile(
-        r'(?<=[^\s#*+=\nA-Z\d])'  # preceded by lowercase letter or punctuation (not uppercase/digit)
+        r'(?<=[^\s#*+=\nA-Z\d(])'  # preceded by lowercase letter or punctuation (not uppercase/digit/open-paren)
         r'(\s*)'
         r'([#*+=]?[A-D]\))',      # uppercase A-D option marker
         re.UNICODE,
     )
     _INLINE_OPT_LOWER = re.compile(
-        r'(?<=[^\s#*+=\na-zA-Z\d])'  # preceded by punctuation only
+        r'(?<=[^\s#*+=\na-zA-Z\d(])'  # preceded by punctuation only (not open-paren)
         r'(\s*)'
         r'([#*+=]?[a-d]\))',          # lowercase a-d option marker
         re.UNICODE,
