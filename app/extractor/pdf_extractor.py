@@ -224,9 +224,13 @@ class PDFExtractor(BaseExtractor):
         "bu") are ignored to avoid false negatives on dangling conjunctions.
         """
         def _clean_words(text: str) -> list[str]:
+            # Normalize dash variants (en/em dash vs hyphen) so two options
+            # that differ only in which dash glyph the PDF happened to embed
+            # still compare as the same word.
+            normalized = text.replace("–", "-").replace("—", "-")
             return [
                 w.strip(".,;:?!").lower()
-                for w in text.strip().split()
+                for w in normalized.strip().split()
                 if len(w.strip(".,;:?!")) > 2
             ]
 
@@ -246,6 +250,15 @@ class PDFExtractor(BaseExtractor):
                 if ch.isupper():
                     return False
                 break
+
+        # Two lines that restate most of the same significant words are
+        # almost certainly separate (near-duplicate) options rather than one
+        # sentence flowing onto the next line — a genuine continuation
+        # introduces new words instead of repeating the ones already said.
+        prev_word_set = set(prev_words)
+        shared = sum(1 for w in curr_words if w in prev_word_set)
+        if len(curr_words) >= 3 and shared / len(curr_words) > 0.5:
+            return False
 
         prev_tail = set(prev_words[-3:])   # last 3 key words of previous line
         curr_head = curr_words[:3]          # first 3 key words of current line
