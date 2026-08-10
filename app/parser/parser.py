@@ -85,15 +85,41 @@ class QuestionParser:
         )
         return '\n'.join(result)
 
+    # Matches numbered questions with no space after separator: 30.Q, 57"Q, 58."Q
+    # Uses chr() to avoid smart-quote substitution in the source file.
+    _NO_OPT_Q_SEP = (
+        '[.)'
+        + chr(0x27) + chr(0x22)   # ASCII apostrophe and double quote
+        + chr(0x201c) + chr(0x201d)  # curly double quotes
+        + chr(0xab) + chr(0xbb)   # angle quotes
+        + ']'
+    )
+    _NO_SPACE_NUM_Q = re.compile(r'^\d+' + _NO_OPT_Q_SEP + r'{1,2}[A-ZА-Яa-zа-я]', re.UNICODE)
+
+    # Detects "B) #text" or "B)# text" — ABC option with # correct marker
+    _abc_hash_re = re.compile(r'^([a-fA-F])[\.\)]\s*#\s*(.*)', re.UNICODE)
+
+    OPTIONS_PER_QUESTION_NO_MARKERS = 4
+
+    @classmethod
+    def _is_no_marker_q_start(cls, stripped: str) -> bool:
+        return (stripped.startswith("?") and len(stripped) > 1) or bool(
+            cls._NO_SPACE_NUM_Q.match(stripped)
+        )
+
     def _preprocess_no_option_markers(self, text: str) -> str | None:
         """
         Handle PDFs where ? marks questions but options have no = / + markers.
 
         Detects the format when ? questions exist but option markers are nearly
-        absent (< 2 per question on average). Adds = before each of the first 4
-        non-? lines that follow a question, so ClassicParser can parse them.
-        Works together with the PDF extractor's wrap-joining: by the time this
-        runs, wrapped continuation lines have already been merged into one line.
+        absent (< 2 per question on average). Every question in this format has
+        exactly OPTIONS_PER_QUESTION_NO_MARKERS options, so for each question
+        block we look ahead to the next '?' line and count the non-empty lines
+        in between: the LAST 4 of them are the real options (get an '=' marker),
+        and any lines *before* those 4 are a wrapped continuation of the question
+        text (left unmarked, so ClassicParser folds them back into the question —
+        continuation can only precede the options, never follow them, since a
+        question can't resume after its own answer choices).
         """
         lines = text.splitlines()
 
@@ -106,63 +132,40 @@ class QuestionParser:
         if opt_count >= q_count * 2:
             return None
 
-        # Matches numbered questions with no space after separator: 30.Q, 57"Q, 58."Q
-        # Uses chr() to avoid smart-quote substitution in the source file.
-        _Q_SEP = (
-            '[.)'
-            + chr(0x27) + chr(0x22)   # ASCII apostrophe and double quote
-            + chr(0x201c) + chr(0x201d)  # curly double quotes
-            + chr(0xab) + chr(0xbb)   # angle quotes
-            + ']'
-        )
-        _NO_SPACE_NUM_Q = re.compile(r'^\d+' + _Q_SEP + r'{1,2}[A-ZА-Яa-zа-я]', re.UNICODE)
+        q_idxs = [
+            i for i, ln in enumerate(lines)
+            if ln.strip() and self._is_no_marker_q_start(ln.strip())
+        ]
+        if not q_idxs:
+            return None
 
-        # Detects "B) #text" or "B)# text" — ABC option with # correct marker
-        _abc_hash_re = re.compile(r'^([a-fA-F])[\.\)]\s*#\s*(.*)', re.UNICODE)
+        is_option_line = [False] * len(lines)
+        for pos, qi in enumerate(q_idxs):
+            block_end = q_idxs[pos + 1] if pos + 1 < len(q_idxs) else len(lines)
+            content_idxs = [i for i in range(qi + 1, block_end) if lines[i].strip()]
+            overflow = max(0, len(content_idxs) - self.OPTIONS_PER_QUESTION_NO_MARKERS)
+            for i in content_idxs[overflow:]:
+                is_option_line[i] = True
 
         result: list[str] = []
-        in_question = False
-        options_added = 0
-        q_text_so_far = ""  # accumulated question text for the current question
-
-        for line in lines:
+        for i, line in enumerate(lines):
             stripped = line.strip()
-            if not stripped:
+            if not stripped or self._is_no_marker_q_start(stripped) or not is_option_line[i]:
+                # Blank line, question start, or a wrapped question-continuation
+                # line — left untouched so ClassicParser appends it to the
+                # question text (it has no options yet at that point).
                 result.append(line)
                 continue
 
-            is_q_start = (stripped.startswith("?") and len(stripped) > 1) or _NO_SPACE_NUM_Q.match(stripped)
-            if is_q_start:
-                in_question = True
-                options_added = 0
-                q_text_so_far = stripped
-                result.append(line)
-            elif in_question and options_added < 4:
-                # A line ending with '?' before any options is usually a wrapped
-                # continuation of the question text — UNLESS the accumulated
-                # question text already ends with '?', in which case the question
-                # is complete and this line is the first answer choice.
-                is_q_continuation = (
-                    options_added == 0
-                    and stripped.endswith("?")
-                    and not q_text_so_far.rstrip().endswith("?")
-                )
-                if is_q_continuation:
-                    q_text_so_far += " " + stripped
-                    result.append(line)
-                else:
-                    abc_hash = _abc_hash_re.match(stripped)
-                    if abc_hash:
-                        # "B) #Correct answer" → "+ Correct answer"
-                        result.append("+ " + abc_hash.group(2).strip())
-                    elif stripped.startswith('#'):
-                        # "#Correct answer" (standalone # prefix) → "+ Correct answer"
-                        result.append("+ " + stripped[1:].strip())
-                    else:
-                        result.append("= " + stripped)
-                    options_added += 1
+            abc_hash = self._abc_hash_re.match(stripped)
+            if abc_hash:
+                # "B) #Correct answer" → "+ Correct answer"
+                result.append("+ " + abc_hash.group(2).strip())
+            elif stripped.startswith('#'):
+                # "#Correct answer" (standalone # prefix) → "+ Correct answer"
+                result.append("+ " + stripped[1:].strip())
             else:
-                result.append(line)
+                result.append("= " + stripped)
 
         log.info(
             f"Belgisiz variant formati aniqlandi: {q_count} ta savol uchun = belgilari qo'shildi."
