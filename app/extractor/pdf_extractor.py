@@ -20,6 +20,12 @@ from .vector_arrow_fixer import fix_vector_arrows
 
 log = get_logger(__name__)
 
+# Detects a second sentence glued directly onto the tail of a line with no
+# separating space, e.g. "длинийВ каком слове ...?" — a lowercase letter
+# immediately followed by an uppercase letter that starts a run ending in
+# "?". See the split logic in _extract_page_with_highlights for context.
+_GLUED_QUESTION = re.compile(r"([a-zа-яёʻʼ])([A-ZА-ЯЁ][^?\n]{5,200}\?)\s*$")
+
 
 class PDFExtractor(BaseExtractor):
     """
@@ -388,6 +394,29 @@ class PDFExtractor(BaseExtractor):
                     x1 = bbox[2] if bbox else 0.0
                     y0 = bbox[1] if bbox else 0.0
 
+                    # ── Split two content runs glued with no separator ───────
+                    # Some source PDFs place one question's answer text and the
+                    # NEXT question's stem in the same content-stream line, with
+                    # no space or newline between them — PyMuPDF then reports it
+                    # as a single "line" (e.g. "= длинийВ каком слове ...Р?").
+                    # Tell: a lowercase letter is immediately followed (zero
+                    # whitespace) by an uppercase letter, and everything from
+                    # there to the end of the line is itself a full sentence
+                    # ending in "?". Split it back into two lines so the second
+                    # question doesn't get swallowed into the first line's text
+                    # (and, if highlighted, wrongly inherit its correct-marker).
+                    tail_question: str | None = None
+                    if not stripped.startswith("?"):
+                        glue_m = _GLUED_QUESTION.search(stripped)
+                        if glue_m:
+                            tail_question = glue_m.group(2).strip()
+                            line_str = stripped[: glue_m.start(2)].rstrip()
+                            stripped = line_str
+                            log.info(
+                                "PDF qatorlari qo'shilib ketgan edi, ajratildi: "
+                                f"…{line_str[-25:]!r} | ? {tail_question[:50]!r}…"
+                            )
+
                     if highlight_rects and bbox and self._is_highlighted(bbox, highlight_rects):
                         # Convert wrong/normal marker to correct marker
                         if stripped.startswith("="):
@@ -415,6 +444,9 @@ class PDFExtractor(BaseExtractor):
                                 log.info(f"Highlight detected! Added '#' for blocks option: {stripped}")
 
                     raw_lines.append((line_str, x1, y0))
+                    if tail_question:
+                        # New line, never highlighted — it's a fresh question stem.
+                        raw_lines.append((f"? {tail_question}", 0.0, y0))
 
             # Merge pending image tokens into raw_lines at the correct position.
             # Each token is inserted before the first text line whose y0 exceeds

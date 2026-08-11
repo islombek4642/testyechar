@@ -175,6 +175,17 @@ class QuestionValidator:
             unique_options.append(opt)
             unique_correct.append(raw_opt.is_correct)
 
+        # ── Flag questions that don't end up with exactly 4 options ──────
+        # Not an error (some legitimate question sets use 3, 5, or 6
+        # options), but this test bank format is expected to be strictly
+        # 4-way multiple choice, so a different count is worth a human
+        # double-checking — often a sign of a parsing/merge glitch.
+        if unique_options and len(unique_options) != 4:
+            warnings.append(
+                f"{prefix}: 4 emas, {len(unique_options)} ta variant aniqlandi. "
+                f"Qo'lda tekshirib chiqing."
+            )
+
         # ── Build validated question if no errors ───────────────────────
         if errors:
             for e in errors:

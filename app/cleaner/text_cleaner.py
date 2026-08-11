@@ -159,10 +159,47 @@ class TextCleaner:
 
     @staticmethod
     def normalize_dashes(text: str) -> str:
-        """Replace unicode dashes with simple hyphens."""
-        for fancy, plain in _DASH_MAP.items():
-            text = text.replace(fancy, plain)
-        return text
+        """
+        Replace unicode dashes with simple hyphens.
+
+        Skipped for a single answer-option line when doing so would make it
+        byte-identical to a sibling option already seen in the same option
+        block (a run of consecutive "="/"+"-prefixed lines). Some quizzes
+        intentionally spell one option with a hyphen and another with an
+        en/em-dash to test punctuation awareness (e.g. "северо-американский"
+        vs "северо—американский") — collapsing both to a plain hyphen would
+        make them read as the same option and the duplicate-remover would
+        silently drop one, losing a real answer choice.
+        """
+        lines = text.split("\n")
+        out: list[str] = []
+        seen_in_block: list[str] = []
+
+        def _plain(s: str) -> str:
+            for fancy, plain in _DASH_MAP.items():
+                s = s.replace(fancy, plain)
+            return s
+
+        for line in lines:
+            stripped = line.strip()
+            if stripped[:1] in ("=", "+"):
+                marker, rest = stripped[0], stripped[1:]
+                normalized_rest = _plain(rest).strip()
+                if normalized_rest in seen_in_block:
+                    # Normalizing collides with a sibling option — keep the
+                    # original dash glyph so the two remain distinguishable.
+                    out.append(line)
+                    seen_in_block.append(rest.strip())
+                else:
+                    leading_ws = line[: len(line) - len(line.lstrip())]
+                    out.append(f"{leading_ws}{marker}{_plain(rest)}")
+                    seen_in_block.append(normalized_rest)
+            else:
+                if stripped:
+                    seen_in_block = []  # any non-option line ends the block
+                out.append(_plain(line))
+
+        return "\n".join(out)
 
     @staticmethod
     def normalize_whitespace(text: str) -> str:
