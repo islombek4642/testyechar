@@ -23,8 +23,17 @@ log = get_logger(__name__)
 # Detects a second sentence glued directly onto the tail of a line with no
 # separating space, e.g. "длинийВ каком слове ...?" — a lowercase letter
 # immediately followed by an uppercase letter that starts a run ending in
-# "?". See the split logic in _extract_page_with_highlights for context.
-_GLUED_QUESTION = re.compile(r"([a-zа-яёʻʼ])([A-ZА-ЯЁ][^?\n]{5,200}\?)\s*$")
+# "?". Both require the glued tail to contain at least 3 words (2+ interior
+# spaces) so a single mixed-case WORD used as an intentional capitalization
+# test option (e.g. "мАРИЯ", "ЯнВарь") is never mistaken for a second glued
+# sentence. See the split logic in _extract_page_with_highlights for context.
+_GLUED_QUESTION = re.compile(r"([a-zа-яёʻʼ_])([A-ZА-ЯЁ]\S*(?:\s+\S+){2,}\?)\s*$")
+# Same glue boundary, but the tail never reaches a "?" — it's an orphaned
+# fragment (a leftover/incomplete question stem in the source PDF with no
+# discoverable continuation nearby) rather than a real second question.
+# There's nowhere sensible to place it, so it's dropped rather than left
+# polluting the option's text.
+_GLUED_FRAGMENT = re.compile(r"([a-zа-яёʻʼ_])([A-ZА-ЯЁ]\S*(?:\s+\S+){2,})$")
 
 
 class PDFExtractor(BaseExtractor):
@@ -416,6 +425,19 @@ class PDFExtractor(BaseExtractor):
                                 "PDF qatorlari qo'shilib ketgan edi, ajratildi: "
                                 f"…{line_str[-25:]!r} | ? {tail_question[:50]!r}…"
                             )
+                        else:
+                            frag_m = _GLUED_FRAGMENT.search(stripped)
+                            if frag_m:
+                                # Orphaned fragment with no "?" of its own and no
+                                # discoverable continuation — drop it rather than
+                                # leave it polluting the option's text.
+                                dropped = frag_m.group(2).strip()
+                                line_str = stripped[: frag_m.start(2)].rstrip()
+                                stripped = line_str
+                                log.info(
+                                    "PDF'da yetim qator bo'lagi topildi va olib "
+                                    f"tashlandi: …{line_str[-25:]!r} | {dropped[:50]!r}…"
+                                )
 
                     if highlight_rects and bbox and self._is_highlighted(bbox, highlight_rects):
                         # Convert wrong/normal marker to correct marker
