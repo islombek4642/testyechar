@@ -14,6 +14,7 @@ import re
 import fitz  # PyMuPDF
 
 from app.utils.logger import get_logger
+from app.parser.abc_parser import _OPT_LETTER_CLASS, _SECTION_HEADER_RE
 from .base import BaseExtractor, ExtractionResult
 from .matrix_reconstructor import fix_matrices_in_text
 from .vector_arrow_fixer import fix_vector_arrows
@@ -446,10 +447,10 @@ class PDFExtractor(BaseExtractor):
                             # Replace first occurrence of '=' with '+'
                             line_str = line_str.replace("=", "+", 1)
                             log.info(f"Highlight detected! Converted '=' to '+' for option: {stripped}")
-                        elif re.match(r"^[a-fA-F][\.\)]\s*", stripped):
+                        elif re.match(r"^[" + _OPT_LETTER_CLASS + r"][\.\)]\s*", stripped):
                             # e.g., "A) Romantizm" -> "#A) Romantizm"
                             if not stripped.startswith("#"):
-                                match = re.match(r"^([a-fA-F][\.\)])", line_str)
+                                match = re.match(r"^([" + _OPT_LETTER_CLASS + r"][\.\)])", line_str)
                                 if match:
                                     prefix = match.group(1)
                                     line_str = line_str.replace(prefix, f"#{prefix}", 1)
@@ -460,7 +461,20 @@ class PDFExtractor(BaseExtractor):
                                 stripped.startswith("?") or
                                 re.match(r"^\d+[\.\)]", stripped)
                             )
-                            if not is_question and not stripped.startswith("#") and not stripped.startswith("+"):
+                            # Section/part headers ("ЧАСТЬ 3. Вопросы 74, 75: ...",
+                            # "Часть 4. Вопросы 76-94: ...") often sit inside their
+                            # own decorative background box, which the highlight
+                            # detector reads the same as an answer-choice box. They
+                            # are not an option — never mark them as one, or the
+                            # header text ends up glued onto whatever option comes
+                            # right before it via continuation.
+                            is_section_header = bool(_SECTION_HEADER_RE.match(stripped))
+                            if (
+                                not is_question
+                                and not is_section_header
+                                and not stripped.startswith("#")
+                                and not stripped.startswith("+")
+                            ):
                                 leading_spaces = len(line_str) - len(line_str.lstrip())
                                 line_str = line_str[:leading_spaces] + "#" + line_str[leading_spaces:]
                                 log.info(f"Highlight detected! Added '#' for blocks option: {stripped}")

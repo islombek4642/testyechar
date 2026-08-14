@@ -1,4 +1,5 @@
 from app.parser.abc_parser import ABCParser
+from app.parser.parser import QuestionParser
 
 
 SAMPLE = """
@@ -55,3 +56,64 @@ def test_abc_parser_still_supports_leading_hash_marker():
     correct_options = [i for i, o in enumerate(questions[0].options) if o.is_correct]
     assert correct_options == [1]
     assert questions[0].options[1].text == "To'g'ri javob"
+
+
+def test_abc_parser_supports_cyrillic_option_letters():
+    """Some Russian test banks letter their options А) Б) В) Г) (Cyrillic)
+    instead of A) B) C) D) (Latin) -- same 4-way structure, different
+    alphabet. Format auto-detection must route these to ABCParser too."""
+    text = (
+        "35. Мальчик очень вежлив …\n"
+        "А) Со всем\n"
+        "Б) Со всеми\n"
+        "В) Всем\n"
+        "Г) Всеми\n"
+        "36. ……мы поедем на каникулы.\n"
+        "А) Через несколько дней\n"
+        "Б) Несколько дней\n"
+        "В) За несколько дней\n"
+        "Г) С несколько дней\n"
+    )
+    parser = QuestionParser()
+    questions = parser.parse(text)
+
+    assert len(questions) == 2
+    assert questions[0].question_text == "Мальчик очень вежлив …"
+    assert [o.text for o in questions[0].options] == [
+        "Со всем", "Со всеми", "Всем", "Всеми",
+    ]
+
+
+def test_abc_parser_correct_answer_line_supports_cyrillic_letter():
+    lines = [
+        "1. Savol matni?",
+        "А) Noto'g'ri javob",
+        "Б) To'g'ri javob",
+        "В) Noto'g'ri javob",
+        "Ответ: Б",
+    ]
+    questions = ABCParser().parse(lines)
+
+    assert len(questions) == 1
+    correct_options = [i for i, o in enumerate(questions[0].options) if o.is_correct]
+    assert correct_options == [1]
+
+
+def test_abc_parser_skips_section_header_between_questions():
+    """"ЧАСТЬ N. Вопросы ..." section headers some test banks insert
+    between question groups must be dropped, not folded into the
+    preceding option as a continuation line."""
+    lines = [
+        "1. Savol matni?",
+        "А) variant1",
+        "Б) variant2",
+        "ЧАСТЬ 2. Вопросы 2-5: выберите свой вариант ответа.",
+        "2. Ikkinchi savol?",
+        "А) variant3",
+        "Б) variant4",
+    ]
+    questions = ABCParser().parse(lines)
+
+    assert len(questions) == 2
+    assert questions[0].options[-1].text == "variant2"
+    assert questions[1].question_text == "Ikkinchi savol?"

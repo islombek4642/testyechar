@@ -15,7 +15,7 @@ from app.utils.logger import get_logger
 from .image_tokens import extract_image_tokens
 from .parser_types import FormatType
 from .classic_parser import ClassicParser
-from .abc_parser import ABCParser
+from .abc_parser import ABCParser, _OPT_LETTER_CLASS
 from .blocks_parser import BlocksParser
 from .gift_parser import GIFTParser
 
@@ -97,7 +97,7 @@ class QuestionParser:
     _NO_SPACE_NUM_Q = re.compile(r'^\d+' + _NO_OPT_Q_SEP + r'{1,2}[A-ZА-Яa-zа-я]', re.UNICODE)
 
     # Detects "B) #text" or "B)# text" — ABC option with # correct marker
-    _abc_hash_re = re.compile(r'^([a-fA-F])[\.\)]\s*#\s*(.*)', re.UNICODE)
+    _abc_hash_re = re.compile(r'^([' + _OPT_LETTER_CLASS + r'])[\.\)]\s*#\s*(.*)', re.UNICODE)
 
     OPTIONS_PER_QUESTION_NO_MARKERS = 4
 
@@ -187,7 +187,7 @@ class QuestionParser:
     # ("asos = so'z yasovchi = lug'aviy shakl yasovchi ...", a morpheme-formula
     # description that must NOT be chopped into fragments).
     _EMBEDDED_OPT_RE = re.compile(
-        r'(?<=\S)\s+(?=[A-Fa-f][\.\)]\s)'
+        r'(?<=\S)\s+(?=[' + _OPT_LETTER_CLASS + r'][\.\)]\s)'
         r'|(?<=\S)\s+(?=\+\s(?!\d))'
         r'|(?<=[.!?])\s+(?==\s(?!\d))',
         re.UNICODE,
@@ -195,7 +195,7 @@ class QuestionParser:
     # Recognises lines that already start with an option, a numbered question,
     # or a Classic-format marker (?/=/+). No required space after "="/"+"/"?" --
     # some PDFs extract them glued directly onto the text ("=Barcha ...").
-    _OPT_OR_Q_START  = re.compile(r'^(?:[A-Fa-f][\.\)]|\d+[\.\)]|[=+?])', re.UNICODE)
+    _OPT_OR_Q_START  = re.compile(r'^(?:[' + _OPT_LETTER_CLASS + r'][\.\)]|\d+[\.\)]|[=+?])', re.UNICODE)
 
     @classmethod
     def _split_merged_option_lines(cls, lines: List[str]) -> List[str]:
@@ -328,9 +328,13 @@ class QuestionParser:
         classic_questions = len(re.findall(r"^\?\s*\S", text, re.MULTILINE))
         classic_options = len(re.findall(r"^[+=]\s*\S", text, re.MULTILINE))
         
-        # 3. ABC format detection: count numbered questions (1. 2)) and letters (A) B. #C) *D))
+        # 3. ABC format detection: count numbered questions (1. 2)) and letters
+        # (A) B. #C) *D)), including the Cyrillic А) Б) В) Г) scheme some
+        # Russian test banks use in place of Latin letters.
         abc_questions = len(re.findall(r"^\d+[\.\)]\s*\S", text, re.MULTILINE))
-        abc_options = len(re.findall(r"^[#*+=]?\s*[a-fA-F][\.\)]\s*\S", text, re.MULTILINE))
+        abc_options = len(re.findall(
+            r"^[#*+=]?\s*[" + _OPT_LETTER_CLASS + r"][\.\)]\s*\S", text, re.MULTILINE
+        ))
 
         log.debug(
             f"Layout Analysis: Classic Q={classic_questions}, Opts={classic_options} | "
