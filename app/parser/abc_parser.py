@@ -13,6 +13,28 @@ from .state_machine import ParserState
 
 log = get_logger(__name__)
 
+# Cyrillic option-letter scheme used by some Russian test banks in place of
+# A) B) C) D) — the four letters map 1:1 onto positions 0-3, same as a-f.
+_CYRILLIC_LETTERS = "АБВГДЕ"
+# Character class fragment combining Latin a-f/A-F with the Cyrillic set,
+# for use inside option-marker regexes.
+_OPT_LETTER_CLASS = "A-Fa-f" + _CYRILLIC_LETTERS + _CYRILLIC_LETTERS.lower()
+
+
+def _letter_to_index(letter: str) -> int:
+    """Map a Latin (A-F) or Cyrillic (А-Е) option letter to a 0-based index."""
+    upper = letter.upper()
+    if upper in _CYRILLIC_LETTERS:
+        return _CYRILLIC_LETTERS.index(upper)
+    return ord(upper) - ord("A")
+
+
+# Section/part header lines ("ЧАСТЬ 3. Вопросы 74, 75: ...", "Часть 4. Вопросы
+# 76-94: ...") that some Russian test banks insert between question groups.
+# They are neither a question nor an option and must never be folded into
+# whichever question/option happens to precede them as a continuation line.
+_SECTION_HEADER_RE = re.compile(r"^(?:ЧАСТЬ|Часть|часть)\s*\d*", re.UNICODE)
+
 
 class ABCParser:
     """
@@ -33,7 +55,9 @@ class ABCParser:
         r"|correct"                    # English: correct
         r"|answer"                     # English: answer
         r"|right\s+answer"             # English: right answer
-        r")\s*:\s*([a-fA-F])",
+        r"|правильный\s+ответ"         # Russian: правильный ответ
+        r"|ответ"                      # Russian: ответ
+        r")\s*:\s*([" + _OPT_LETTER_CLASS + r"])",
         re.IGNORECASE | re.UNICODE,
     )
 
@@ -47,10 +71,15 @@ class ABCParser:
         self._q_regex = re.compile(r"^\d+[\.\)\s]\s*(.*)", re.UNICODE)
 
         # Regex for correct option: "#A) Option", "*B) Option", "+C. Option", "=D) Option"
-        self._correct_opt_regex = re.compile(r"^[#*+=]\s*([a-fA-F])[\.\)]\s*(.*)", re.UNICODE)
+        self._correct_opt_regex = re.compile(
+            r"^[#*+=]\s*([" + _OPT_LETTER_CLASS + r"])[\.\)]\s*(.*)", re.UNICODE
+        )
 
-        # Regex for normal option: e.g. "A) Option" or "B. Option"
-        self._normal_opt_regex = re.compile(r"^([a-fA-F])[\.\)]\s*(.*)", re.UNICODE)
+        # Regex for normal option: e.g. "A) Option" or "B. Option" — also
+        # accepts the Cyrillic А) Б) В) Г) scheme some Russian test banks use.
+        self._normal_opt_regex = re.compile(
+            r"^([" + _OPT_LETTER_CLASS + r"])[\.\)]\s*(.*)", re.UNICODE
+        )
 
     def parse(self, lines: List[str]) -> List[RawQuestion]:
         self._state = ParserState.WAITING_QUESTION
@@ -60,6 +89,10 @@ class ABCParser:
         for self._line_number, line in enumerate(lines, start=1):
             stripped = line.strip()
             if not stripped:
+                continue
+
+            if _SECTION_HEADER_RE.match(stripped):
+                log.debug(f"Line {self._line_number}: Skipping section header: {stripped}")
                 continue
 
             # Check matching patterns
@@ -101,7 +134,7 @@ class ABCParser:
                 togri_m = self._TOGRI_JAVOB_RE.match(stripped)
                 if togri_m and self._current is not None:
                     correct_letter = togri_m.group(1).upper()
-                    correct_idx = ord(correct_letter) - ord('A')
+                    correct_idx = _letter_to_index(correct_letter)
                     if 0 <= correct_idx < len(self._current.options):
                         for opt in self._current.options:
                             opt.is_correct = False
