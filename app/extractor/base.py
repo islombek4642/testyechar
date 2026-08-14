@@ -13,6 +13,8 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from pathlib import Path
 
+from app.parser.abc_parser import _SECTION_HEADER_RE
+
 
 @dataclass
 class ExtractionResult:
@@ -139,6 +141,8 @@ class BaseExtractor(ABC):
                     break
                 if cls._BLOCKS_SEP_RE.match(s2):
                     break  # blocks separator marks end of question
+                if _SECTION_HEADER_RE.match(s2):
+                    break  # "ЧАСТЬ N. ..." section header marks end of question
                 if cls._OPTION_MARKER.match(s2):
                     opt_idx.append(j)
                 j += 1

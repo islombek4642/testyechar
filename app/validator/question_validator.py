@@ -162,7 +162,7 @@ class QuestionValidator:
             )
 
         # ── Check for duplicate options ─────────────────────────────────
-        seen: set[str] = set()
+        seen: dict[str, int] = {}
         unique_options: list[str] = []
         unique_correct: list[bool] = []
         for opt, raw_opt in zip(non_empty, raw.options):
@@ -170,8 +170,13 @@ class QuestionValidator:
                 warnings.append(
                     f"{prefix}: Takroriy variant olib tashlandi: «{opt}»"
                 )
+                # A later duplicate marked correct (e.g. by bold-text
+                # detection) must not lose that status just because an
+                # earlier, unmarked duplicate happened to be kept instead.
+                if raw_opt.is_correct:
+                    unique_correct[seen[opt]] = True
                 continue
-            seen.add(opt)
+            seen[opt] = len(unique_options)
             unique_options.append(opt)
             unique_correct.append(raw_opt.is_correct)
 
