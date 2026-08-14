@@ -186,8 +186,14 @@ class QuestionParser:
     # ...") from "=" used as plain notation inside one option/question
     # ("asos = so'z yasovchi = lug'aviy shakl yasovchi ...", a morpheme-formula
     # description that must NOT be chopped into fragments).
+    #
+    # Deliberately Latin-letter-only (not the full _OPT_LETTER_CLASS): unlike
+    # a line START match, this fires on a mid-line lookahead, and Cyrillic
+    # initial+surname references ("Б. Васильев", "А. Пушкин") are common
+    # prose in Russian question text — extending this to Cyrillic would
+    # split a question's own text apart at every such name.
     _EMBEDDED_OPT_RE = re.compile(
-        r'(?<=\S)\s+(?=[' + _OPT_LETTER_CLASS + r'][\.\)]\s)'
+        r'(?<=\S)\s+(?=[A-Fa-f][\.\)]\s)'
         r'|(?<=\S)\s+(?=\+\s(?!\d))'
         r'|(?<=[.!?])\s+(?==\s(?!\d))',
         re.UNICODE,
@@ -195,7 +201,8 @@ class QuestionParser:
     # Recognises lines that already start with an option, a numbered question,
     # or a Classic-format marker (?/=/+). No required space after "="/"+"/"?" --
     # some PDFs extract them glued directly onto the text ("=Barcha ...").
-    _OPT_OR_Q_START  = re.compile(r'^(?:[' + _OPT_LETTER_CLASS + r'][\.\)]|\d+[\.\)]|[=+?])', re.UNICODE)
+    # Latin-only for the same reason as _EMBEDDED_OPT_RE above.
+    _OPT_OR_Q_START  = re.compile(r'^(?:[A-Fa-f][\.\)]|\d+[\.\)]|[=+?])', re.UNICODE)
 
     @classmethod
     def _split_merged_option_lines(cls, lines: List[str]) -> List[str]:

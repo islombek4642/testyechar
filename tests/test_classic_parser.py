@@ -22,6 +22,24 @@ def test_split_merged_option_lines_recovers_embedded_correct_marker():
     assert q.options[2].text == "Sinfimizda a'lochi o'quvchilar ko'p."
 
 
+def test_split_merged_option_lines_ignores_cyrillic_name_initials():
+    """"Б. Васильев" (a Russian author's initial + surname) must NOT be
+    mistaken for an embedded Cyrillic ABC option marker ("Б) ...") and
+    split off from the question it belongs to -- this pattern is common,
+    ordinary prose in Russian literature/history question text."""
+    text = (
+        "? Б. Васильев написал..\n"
+        "= Судьба человека\n"
+        "= А зори здесь тихие\n"
+        "= Тихий Дон\n"
+    )
+    questions = QuestionParser().parse(text)
+
+    assert len(questions) == 1
+    assert questions[0].question_text == "Б. Васильев написал.."
+    assert len(questions[0].options) == 3
+
+
 def test_split_merged_option_lines_ignores_notation_equals_signs():
     """"=" used as plain notation inside a question ("asos = so'z yasovchi
     = ...") must NOT be chopped into fake options -- only "=" that follows
