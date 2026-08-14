@@ -300,6 +300,16 @@ class PDFExtractor(BaseExtractor):
             # Check horizontal overlap
             if lx1 < hx0 or lx0 > hx1:
                 continue
+            # A highlight meant to mark ONE option is roughly that line's
+            # height. Some documents also use much taller bars purely as
+            # decorative section/paragraph background shading (instruction
+            # blocks, title bars) — those aren't an answer marker, and
+            # without this guard every line of prose sitting inside one
+            # gets misread as "correct". Reject rects far taller than the
+            # line they'd be marking.
+            highlight_h = hy1 - hy0
+            if highlight_h > line_h * 2.5:
+                continue
             # Check vertical overlap (at least 40% vertical overlap)
             overlap_y = max(0.0, min(ly1, hy1) - max(ly0, hy0))
             if (overlap_y / line_h) > 0.4:

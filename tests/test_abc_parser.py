@@ -117,3 +117,32 @@ def test_abc_parser_skips_section_header_between_questions():
     assert len(questions) == 2
     assert questions[0].options[-1].text == "variant2"
     assert questions[1].question_text == "Ikkinchi savol?"
+
+
+def test_abc_parser_skips_typo_section_header_missing_soft_sign():
+    """A section header typo'd without the trailing "ь" ("ЧАСТ 4." instead
+    of "ЧАСТЬ 4.") must still be recognized and skipped, not glued onto
+    the preceding option."""
+    lines = [
+        "1. Savol matni?",
+        "А) variant1",
+        "Б) variant2",
+        "ЧАСТ 4. Вопросы 97-100 выберите все возможные варианты.",
+        "2. Ikkinchi savol?",
+        "А) variant3",
+        "Б) variant4",
+    ]
+    questions = ABCParser().parse(lines)
+
+    assert len(questions) == 2
+    assert questions[0].options[-1].text == "variant2"
+
+
+def test_section_header_regex_does_not_match_ordinary_words():
+    """Ordinary Russian words sharing the "част-" stem ("частица",
+    "частный", "частота") must not be mistaken for a section header --
+    only the header form (stem + digit) should match."""
+    from app.parser.abc_parser import _SECTION_HEADER_RE
+
+    for word in ["частица", "Частный случай", "частота колебаний"]:
+        assert _SECTION_HEADER_RE.match(word) is None

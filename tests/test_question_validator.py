@@ -20,3 +20,26 @@ def test_non_four_option_count_is_flagged_for_review():
     results = QuestionValidator().validate_all([_raw(["a", "b", "c"])])
     assert results[0].is_valid  # still valid -- just flagged for a human to check
     assert any("4 emas, 3 ta variant aniqlandi" in w for w in results[0].warnings)
+
+
+def test_duplicate_option_keeps_correct_flag_from_later_occurrence():
+    """When the same option text appears twice and only the LATER copy is
+    marked correct (e.g. the PDF genuinely repeats an option, and only one
+    physical instance happened to be bold-detected as the answer), the
+    surviving (first) copy must inherit that correct flag rather than
+    silently losing it because the earlier, unmarked copy was kept."""
+    raw = RawQuestion(
+        question_text="Savol matni?",
+        options=[
+            RawOption(text="Добраться", is_correct=False),
+            RawOption(text="Дойти", is_correct=False),
+            RawOption(text="Добраться", is_correct=True),
+        ],
+        line_start=1,
+    )
+    results = QuestionValidator().validate_all([raw])
+
+    assert results[0].is_valid
+    q = results[0].question
+    assert q.o == ["Добраться", "Дойти"]
+    assert q.c == 0

@@ -30,10 +30,15 @@ def _letter_to_index(letter: str) -> int:
 
 
 # Section/part header lines ("ЧАСТЬ 3. Вопросы 74, 75: ...", "Часть 4. Вопросы
-# 76-94: ...") that some Russian test banks insert between question groups.
-# They are neither a question nor an option and must never be folded into
-# whichever question/option happens to precede them as a continuation line.
-_SECTION_HEADER_RE = re.compile(r"^(?:ЧАСТЬ|Часть|часть)\s*\d*", re.UNICODE)
+# 76-94: ...", and even typo'd variants like "ЧАСТ 4. Вопросы 97 - 100 ...")
+# that some Russian test banks insert between question groups. They are
+# neither a question nor an option and must never be folded into whichever
+# question/option happens to precede them as a continuation line.
+# "част" + up to 2 more letters (covers "ь", a missing/typo'd "ь", etc.)
+# then whitespace + a digit -- the digit requirement is what keeps this
+# from also matching ordinary Russian words that start with the same stem
+# ("частица", "частный", "частота" ...).
+_SECTION_HEADER_RE = re.compile(r"^част[а-яё]{0,2}\s*\d", re.IGNORECASE | re.UNICODE)
 
 
 class ABCParser:
