@@ -440,6 +440,30 @@ class PDFExtractor(BaseExtractor):
                                     f"tashlandi: …{line_str[-25:]!r} | {dropped[:50]!r}…"
                                 )
 
+                    # ── Bold-text correct-answer marking ──────────────────────
+                    # Some test banks mark the correct option by making its
+                    # whole run bold rather than via a colored highlight box.
+                    # Question stems are bold too, but that's harmless here
+                    # since this check only fires on lines that already look
+                    # like a lettered option ("А) ...", "B) ..."); among a
+                    # question's options, only the correct one is bold.
+                    opt_letter_m = re.match(
+                        r"^[" + _OPT_LETTER_CLASS + r"][\.\)]\s*", stripped
+                    )
+                    if opt_letter_m and not stripped.startswith("#"):
+                        option_spans = [
+                            s for s in line.get("spans", []) if s["text"].strip()
+                        ]
+                        if option_spans and all(
+                            s.get("flags", 0) & 16 for s in option_spans
+                        ):
+                            line_str = "#" + line_str
+                            stripped = line_str.strip()
+                            log.info(
+                                f"Qalin shrift aniqlandi! To'g'ri javob deb "
+                                f"belgilandi: {stripped}"
+                            )
+
                     if highlight_rects and bbox and self._is_highlighted(bbox, highlight_rects):
                         # Convert wrong/normal marker to correct marker
                         if stripped.startswith("="):
