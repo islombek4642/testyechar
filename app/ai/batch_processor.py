@@ -63,8 +63,13 @@ class ClaudeBatchProcessor:
                 # Adaptive fikrlash tool chaqiruvlari orasida avtomatik
                 # interleave qilinadi, shu bilan web_search ishonchli
                 # ishlaydi; byudjet esa `effort` orqali cheklanadi.
+                # `effort: low` amalda tool chaqiruvlarini deyarli bekor
+                # qiladi (Anthropic hujjatiga ko'ra past effort -> kamroq
+                # tool chaqiruvi) — 288 savollik testda web_search 0 marta
+                # chaqirilgani shu bilan tasdiqlandi. `medium` Claude'ga
+                # noaniq savolda haqiqatan qidirish erkinligini beradi.
                 params["thinking"] = {"type": "adaptive"}
-                params["output_config"] = {"effort": "low"}
+                params["output_config"] = {"effort": "medium"}
 
             requests.append({
                 "custom_id": f"chunk-{chunk_idx}",
