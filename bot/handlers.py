@@ -78,6 +78,7 @@ MAX_FILE_BYTES = 20 * 1024 * 1024  # Telegram bot download limit
 
 # AI Resolver uchun tanlash mumkin bo'lgan modellar (ko'rsatiladigan tartibda).
 MODEL_OPTIONS = {
+    "claude-opus-5": "Claude Opus 5",
     "claude-opus-4-8": "Claude Opus 4.8",
     "claude-opus-4-7": "Claude Opus 4.7",
     "claude-sonnet-5": "Claude Sonnet 5",

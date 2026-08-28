@@ -70,11 +70,15 @@ class AsyncClaudeClient:
                 if "claude-3" in self.model.lower():
                     params["temperature"] = 0.0  # Strict, deterministic answers for older models
                 else:
-                    # Fikrlash (thinking) o'chiriladi: bu vazifa oddiy JSON qaytarish,
-                    # fikrlashdan foyda yo'q, lekin ba'zi modellar (masalan Sonnet 5)
-                    # uni standart yoqib qo'yadi va u max_tokens byudjetini
-                    # (shu bilan haqiqiy javobni kesib qo'yishi mumkin) yeb qo'yadi.
-                    params["thinking"] = {"type": "disabled"}
+                    # Fikrlash butunlay o'chirilmaydi: `disabled` holatida
+                    # model tool chaqiruvlarini (web_search) haqiqiy tool_use
+                    # bloki sifatida emas, oddiy matn ichida "soxta" yozib
+                    # qo'yishi mumkin — chaqiruv hech qachon bajarilmaydi.
+                    # Adaptive fikrlash tool chaqiruvlari orasida avtomatik
+                    # interleave qilinadi, shu bilan web_search ishonchli
+                    # ishlaydi; byudjet esa `effort` orqali cheklanadi.
+                    params["thinking"] = {"type": "adaptive"}
+                    params["output_config"] = {"effort": "low"}
 
                 response = await self.client.messages.create(**params)
 

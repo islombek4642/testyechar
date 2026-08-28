@@ -98,12 +98,14 @@ class FakeBot:
         self.edits.append((chat_id, message_id, text))
 
 
-def test_model_options_has_three_models_in_order():
+def test_model_options_has_four_models_in_order():
     assert list(MODEL_OPTIONS.keys()) == [
+        "claude-opus-5",
         "claude-opus-4-8",
         "claude-opus-4-7",
         "claude-sonnet-5",
     ]
+    assert MODEL_OPTIONS["claude-opus-5"] == "Claude Opus 5"
     assert MODEL_OPTIONS["claude-opus-4-8"] == "Claude Opus 4.8"
     assert MODEL_OPTIONS["claude-opus-4-7"] == "Claude Opus 4.7"
     assert MODEL_OPTIONS["claude-sonnet-5"] == "Claude Sonnet 5"
@@ -112,14 +114,14 @@ def test_model_options_has_three_models_in_order():
 def test_settings_keyboard_marks_selected_and_hides_admin_row_for_non_admin():
     kb = settings_keyboard("claude-opus-4-7", is_admin=False)
     texts = [row[0].text for row in kb.keyboard]
-    assert texts == ["Claude Opus 4.8", "✅ Claude Opus 4.7", "Claude Sonnet 5"]
+    assert texts == ["Claude Opus 5", "Claude Opus 4.8", "✅ Claude Opus 4.7", "Claude Sonnet 5"]
 
 
 def test_settings_keyboard_adds_manage_users_row_for_admin():
     kb = settings_keyboard("claude-opus-4-8", is_admin=True)
     texts = [row[0].text for row in kb.keyboard]
     assert texts[-1] == "👥 Foydalanuvchilar"
-    assert len(texts) == 4
+    assert len(texts) == 5
 
 
 def test_get_active_model_falls_back_to_default():
@@ -146,6 +148,7 @@ def test_show_settings_switches_state_and_marks_current_model_for_admin():
     assert "Claude Opus 4.8" in text
     button_texts = [row[0].text for row in markup.keyboard]
     assert button_texts == [
+        "Claude Opus 5",
         "✅ Claude Opus 4.8",
         "Claude Opus 4.7",
         "Claude Sonnet 5",
@@ -195,7 +198,8 @@ def test_handle_model_choice_unrecognized_text_reprompts():
     assert not state.cleared
     assert not bot.edits
     text, markup = message.answers[0]
-    assert [row[0].text for row in markup.keyboard][:3] == [
+    assert [row[0].text for row in markup.keyboard][:4] == [
+        "Claude Opus 5",
         "✅ Claude Opus 4.8",
         "Claude Opus 4.7",
         "Claude Sonnet 5",

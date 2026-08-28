@@ -15,9 +15,14 @@ from app.ai.confidence import ConfidenceTier
 from app.ai.merger import ResolvedQuestion
 
 
-# ── Claude pricing (USD per 1M tokens) — only the 3 models the bot's
+# ── Claude pricing (USD per 1M tokens) — only the models the bot's
 # Sozlamalar menu lets the admin choose from (bot/handlers.py MODEL_OPTIONS).
 PRICING = {
+    "claude-opus-5": {
+        "input_per_mtok": 5.00,
+        "output_per_mtok": 25.00,
+        "batch_discount": 0.50,
+    },
     "claude-opus-4-8": {
         "input_per_mtok": 5.00,
         "output_per_mtok": 25.00,
@@ -28,7 +33,8 @@ PRICING = {
         "output_per_mtok": 25.00,
         "batch_discount": 0.50,
     },
-    # Introductory pricing through 2026-08-31; reverts to $3/$15 on 2026-09-01
+    # $2/$10 was introductory pricing through 2026-08-31; Anthropic made it
+    # the permanent rate instead of reverting to $3/$15 on 2026-09-01
     # (see https://platform.claude.com/docs/en/about-claude/pricing).
     "claude-sonnet-5": {
         "input_per_mtok": 2.00,
