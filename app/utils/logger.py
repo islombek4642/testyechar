@@ -71,7 +71,7 @@ def setup_logging(
     )
 
     # Silence noisy third-party loggers
-    for noisy in ("httpx", "urllib3", "PIL", "watchdog"):
+    for noisy in ("httpx2", "urllib3", "PIL", "watchdog"):
         logging.getLogger(noisy).setLevel(logging.WARNING)
 
 

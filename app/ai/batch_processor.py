@@ -9,7 +9,7 @@ import asyncio
 import json
 from typing import Dict, Any, List
 
-import httpx
+import httpx2 as httpx
 from anthropic import AsyncAnthropic, APIConnectionError, APITimeoutError
 from app.ai.prompts import CLAUDE_SYSTEM_PROMPT, WEB_SEARCH_TOOL, make_user_prompt, make_multimodal_content
 from app.utils.logger import get_logger

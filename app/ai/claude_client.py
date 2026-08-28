@@ -10,7 +10,7 @@ import json
 import random
 from typing import Dict, Any, List, Optional
 
-import httpx
+import httpx2 as httpx
 from anthropic import AsyncAnthropic, APIError, RateLimitError, APIStatusError
 from app.ai.prompts import CLAUDE_SYSTEM_PROMPT, WEB_SEARCH_TOOL, make_user_prompt, make_multimodal_content
 from app.ai.validator import AIAnswer, AIAnswerList

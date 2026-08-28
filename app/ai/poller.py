@@ -9,7 +9,7 @@ import asyncio
 import json
 from typing import Dict, Any, List, Callable, Awaitable
 
-import httpx
+import httpx2 as httpx
 from anthropic import AsyncAnthropic, APITimeoutError
 from app.ai.validator import AIAnswer, AIAnswerList
 from app.ai.claude_client import AsyncClaudeClient
