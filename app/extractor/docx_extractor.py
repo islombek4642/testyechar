@@ -207,21 +207,25 @@ class DOCXExtractor(BaseExtractor):
                 numbering_count = 0
                 for p_text, p in paragraphs:
                     stripped_p_text = p_text.strip()
-                    if self._check_is_correct_option(p):
-                        processed = self._process_highlighted_paragraph_text(p_text)
-                        if processed != p_text:
-                            highlight_count += 1
-                        extracted_lines.append(processed)
-                    elif (
+                    is_numbered_q = (
                         stripped_p_text
                         and stripped_p_text[0] not in "?=+#-–"
                         and self._has_list_numbering(p)
-                    ):
+                    )
+                    # A numbered question is never itself an option -- check
+                    # (and skip) it first so a bold word inside the question
+                    # text can't be misread as a "bold correct option" below.
+                    if is_numbered_q:
                         # Word auto-numbered ("1.", "2." ...) question --
                         # the number is list metadata, not run text, so it's
                         # otherwise indistinguishable from ordinary prose.
                         extracted_lines.append("? " + stripped_p_text)
                         numbering_count += 1
+                    elif self._check_is_correct_option(p):
+                        processed = self._process_highlighted_paragraph_text(p_text)
+                        if processed != p_text:
+                            highlight_count += 1
+                        extracted_lines.append(processed)
                     else:
                         extracted_lines.append(p_text)
 
@@ -274,25 +278,46 @@ class DOCXExtractor(BaseExtractor):
     _A_NS = "http://schemas.openxmlformats.org/drawingml/2006/main"
     _R_NS = "http://schemas.openxmlformats.org/officeDocument/2006/relationships"
 
+    @staticmethod
+    def _run_text(run_elem) -> list[str]:
+        """Collect w:t and w:br (soft return) children of a single w:r run."""
+        parts: list[str] = []
+        for elem in run_elem:
+            elem_local = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
+            if elem_local == "t":
+                parts.append(elem.text or "")
+            elif elem_local == "br":
+                parts.append("\n")
+        return parts
+
     def _extract_paragraph_text(self, paragraph) -> str:
         """
-        Extract text from a paragraph including OMML math equations.
+        Extract text from a paragraph including OMML math equations and
+        hyperlink-wrapped runs.
 
         python-docx's paragraph.text skips <m:oMath> elements entirely.
         This method walks the paragraph XML and converts math elements to
-        readable plain text (e.g. m:f fraction → "π/6").
+        readable plain text (e.g. m:f fraction → "π/6"). It also descends
+        into <w:hyperlink> wrapper elements -- Word auto-links things like
+        bare email addresses and URLs, nesting their run(s) one level
+        deeper than ordinary text; skipping that wrapper (as a plain
+        direct-children walk would) silently drops the linked text
+        entirely, which is disastrous when it's the correct answer itself.
         """
         parts: list[str] = []
         for child in paragraph._element:
             local = child.tag.split("}")[-1] if "}" in child.tag else child.tag
             if local == "r":
-                # Regular text run — collect w:t and w:br (soft return) children
-                for elem in child:
-                    elem_local = elem.tag.split("}")[-1] if "}" in elem.tag else elem.tag
-                    if elem_local == "t":
-                        parts.append(elem.text or "")
-                    elif elem_local == "br":
-                        parts.append("\n")
+                parts.extend(self._run_text(child))
+            elif local == "hyperlink":
+                for grandchild in child:
+                    gc_local = (
+                        grandchild.tag.split("}")[-1]
+                        if "}" in grandchild.tag
+                        else grandchild.tag
+                    )
+                    if gc_local == "r":
+                        parts.extend(self._run_text(grandchild))
             elif local in ("oMath", "oMathPara"):
                 parts.append(self._omml_to_text(child))
         return "".join(parts)
@@ -375,10 +400,16 @@ class DOCXExtractor(BaseExtractor):
                         for paragraph in cell.paragraphs:
                             yield paragraph
 
-    def _check_is_correct_option(self, paragraph) -> bool:
+    def _check_is_correct_option(self, paragraph, allow_bold_only: bool = True) -> bool:
         """
-        Scan all runs in the paragraph to detect highlighting or green/red text color.
+        Scan all runs in the paragraph to detect highlighting, dominant
+        green/red text color, or (when *allow_bold_only* — the paragraph
+        isn't itself a numbered question) plain bold with no special color
+        at all.
         """
+        has_any_run_text = False
+        all_nonempty_bold = True
+        has_any_explicit_color = False
         for run in paragraph.runs:
             # 1. Highlight detection
             try:
@@ -392,6 +423,7 @@ class DOCXExtractor(BaseExtractor):
             # the correct option in green, others in red (often paired with
             # bold), against a neutral/blue color for the wrong options.
             if run.font.color and run.font.color.rgb:
+                has_any_explicit_color = True
                 try:
                     r, g, b = run.font.color.rgb
                     is_dominant_green = g > r + 40 and g > b + 40
@@ -400,6 +432,29 @@ class DOCXExtractor(BaseExtractor):
                         return True
                 except Exception:
                     pass
+
+            if run.text.strip():
+                has_any_run_text = True
+                if not run.bold:
+                    all_nonempty_bold = False
+
+        # 3. Bold with no distinguishing color at all -- some test banks mark
+        # the correct option by making it plain bold (default/black text)
+        # against non-bold wrong options, rather than a color or highlight.
+        # Guarded by allow_bold_only since bold is also commonly used for
+        # ordinary emphasis inside a question's own text; the caller passes
+        # False for paragraphs already known to be a question (e.g. Word
+        # auto-numbered ones) to avoid corrupting them. Also requires NO
+        # explicit color on any run -- a wrong option that happens to carry
+        # its usual (non-red/green) color AND bold for unrelated emphasis
+        # must not be mistaken for this scheme.
+        if (
+            allow_bold_only
+            and has_any_run_text
+            and all_nonempty_bold
+            and not has_any_explicit_color
+        ):
+            return True
 
         return False
 

@@ -96,3 +96,84 @@ def test_word_auto_numbered_question_gets_question_prefix(tmp_path):
     assert "? Birinchi savol matni" in text
     assert "? Ikkinchi savol matni" in text
     assert "+ variant B" in text
+
+
+def test_bold_with_no_color_marks_correct_option(tmp_path):
+    """Some test banks mark the correct option by making it plain bold
+    (default/automatic black text, no explicit color) against non-bold
+    wrong options -- no highlight, no red/green, just weight."""
+    doc = docx.Document()
+    doc.add_paragraph("Savol matni?")
+    doc.add_paragraph("- Noto'g'ri variant 1")
+    p_correct = doc.add_paragraph()
+    p_correct.add_run("- To'g'ri variant").bold = True
+    doc.add_paragraph("- Noto'g'ri variant 2")
+
+    path = tmp_path / "bold_only.docx"
+    doc.save(str(path))
+
+    result = DOCXExtractor().extract(path)
+    assert "+ To'g'ri variant" in result.full_text
+
+
+def test_bold_wrong_colored_option_not_mistaken_for_correct(tmp_path):
+    """A WRONG option that happens to be bold while still carrying its
+    ordinary (non-red/green) color -- bold used for unrelated emphasis,
+    not as the correct-answer scheme -- must not be flagged correct."""
+    doc = docx.Document()
+    doc.add_paragraph("Savol matni?")
+    p_bold_wrong = doc.add_paragraph()
+    run = p_bold_wrong.add_run("- Noto'g'ri, lekin bold")
+    run.font.color.rgb = RGBColor(0x00, 0x20, 0x60)
+    run.bold = True
+    p_correct = doc.add_paragraph()
+    run2 = p_correct.add_run("- To'g'ri variant")
+    run2.font.color.rgb = RGBColor(0xFF, 0x00, 0x00)
+    run2.bold = True
+    doc.add_paragraph("- Noto'g'ri variant")
+
+    path = tmp_path / "bold_wrong_colored.docx"
+    doc.save(str(path))
+
+    result = DOCXExtractor().extract(path)
+    text = result.full_text
+    assert "+ To'g'ri variant" in text
+    assert "+ Noto'g'ri, lekin bold" not in text
+    assert "- Noto'g'ri, lekin bold" in text
+
+
+def test_hyperlink_wrapped_option_text_is_not_lost(tmp_path):
+    """Word auto-links bare email addresses and URLs, nesting their run(s)
+    one level deeper inside a <w:hyperlink> wrapper. Text extraction must
+    still recover that text -- losing it is disastrous when the linked
+    text is the correct answer itself (silently produces an empty option)."""
+    doc = docx.Document()
+    doc.add_paragraph("Savol matni?")
+    doc.add_paragraph("- Oddiy variant")
+
+    p_correct = doc.add_paragraph()
+    # "- " as an ordinary direct run carrying the correct-answer color/bold
+    # -- exactly how the real document is structured: the marker prefix is
+    # a plain run, and Word's auto-link wraps only the linked text itself.
+    prefix_run = p_correct.add_run("- ")
+    prefix_run.font.color.rgb = RGBColor(0xFF, 0x00, 0x00)
+    prefix_run.bold = True
+    # Manually build a <w:hyperlink> wrapping a run, mirroring what Word's
+    # auto-link produces for a bare email address / URL.
+    hyperlink = OxmlElement("w:hyperlink")
+    run_elem = OxmlElement("w:r")
+    t = OxmlElement("w:t")
+    t.text = "dassa@umail.uz"
+    run_elem.append(t)
+    hyperlink.append(run_elem)
+    p_correct._p.append(hyperlink)
+
+    doc.add_paragraph("- Boshqa variant")
+
+    path = tmp_path / "hyperlink_option.docx"
+    doc.save(str(path))
+
+    result = DOCXExtractor().extract(path)
+    text = result.full_text
+    assert "dassa@umail.uz" in text
+    assert "+ dassa@umail.uz" in text
