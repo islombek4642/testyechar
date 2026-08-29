@@ -205,33 +205,106 @@ class DOCXExtractor(BaseExtractor):
                 # --- Pass 2: no explicit markers → use highlighting ---
                 highlight_count = 0
                 numbering_count = 0
+                bold_fallback_count = 0
+
+                # Group into blocks: each starts at a paragraph that looks
+                # like a new question (Word list-numbered, or already
+                # marker-prefixed) and includes every paragraph after it up
+                # to the next such start as its options -- so correctness
+                # can be judged across a whole question's options at once
+                # instead of one paragraph in isolation. A block starts at
+                # a paragraph carrying Word list numbering (numPr) or an
+                # already-present "?" marker -- NOT at "-"/"–"/"="/"+"/"#",
+                # which mark OPTIONS and must stay inside the current
+                # block. Some documents give their options no marker of
+                # any kind at all, relying purely on color/bold to single
+                # out the answer; keying block starts on any of those
+                # option markers would split each such option into its
+                # own bogus single-paragraph "question".
+                blocks: list[list[tuple[str, Any]]] = []
+                current_block: list[tuple[str, Any]] = []
                 for p_text, p in paragraphs:
-                    stripped_p_text = p_text.strip()
-                    is_numbered_q = (
-                        stripped_p_text
-                        and stripped_p_text[0] not in "?=+#-–"
-                        and self._has_list_numbering(p)
+                    stripped = p_text.strip()
+                    is_new_block_start = bool(stripped) and (
+                        stripped.startswith("?") or self._has_list_numbering(p)
                     )
-                    # A numbered question is never itself an option -- check
-                    # (and skip) it first so a bold word inside the question
-                    # text can't be misread as a "bold correct option" below.
+                    if is_new_block_start:
+                        if current_block:
+                            blocks.append(current_block)
+                        current_block = [(p_text, p)]
+                    elif stripped:
+                        current_block.append((p_text, p))
+                    # blank paragraphs are dropped, matching prior behavior
+                    # (they never carried a "-"/"–" prefix either)
+                if current_block:
+                    blocks.append(current_block)
+
+                for block in blocks:
+                    q_text, q_p = block[0]
+                    option_entries = block[1:]
+
+                    stripped_q = q_text.strip()
+                    is_numbered_q = (
+                        stripped_q
+                        and stripped_q[0] not in "?=+#-–"
+                        and self._has_list_numbering(q_p)
+                    )
                     if is_numbered_q:
                         # Word auto-numbered ("1.", "2." ...) question --
-                        # the number is list metadata, not run text, so it's
-                        # otherwise indistinguishable from ordinary prose.
-                        extracted_lines.append("? " + stripped_p_text)
+                        # the number is list metadata, not run text, so
+                        # it's otherwise indistinguishable from ordinary
+                        # prose.
+                        extracted_lines.append("? " + stripped_q)
                         numbering_count += 1
-                    elif self._check_is_correct_option(p):
-                        processed = self._process_highlighted_paragraph_text(p_text)
-                        if processed != p_text:
-                            highlight_count += 1
-                        extracted_lines.append(processed)
                     else:
-                        extracted_lines.append(p_text)
+                        extracted_lines.append(q_text)
+
+                    # A STRONG signal (highlight, dominant red/green) on
+                    # any option settles it outright -- first one wins,
+                    # matching prior behavior.
+                    strong_idx = None
+                    for i, (_, o_p) in enumerate(option_entries):
+                        if self._check_is_correct_option(o_p):
+                            strong_idx = i
+                            break
+
+                    if strong_idx is not None:
+                        for i, (o_text, _) in enumerate(option_entries):
+                            if i == strong_idx:
+                                processed = self._process_highlighted_paragraph_text(o_text)
+                                if processed != o_text:
+                                    highlight_count += 1
+                                extracted_lines.append(processed)
+                            else:
+                                extracted_lines.append(o_text)
+                    else:
+                        # No highlight/red/green anywhere in this block --
+                        # fall back to relative bold: exactly one option
+                        # whose every run is bold, regardless of shared
+                        # color, distinguishes it from its non-bold
+                        # siblings. Covers both a plain-black-bold scheme
+                        # AND a document that colors an entire question
+                        # block uniformly (e.g. all dark blue) and relies
+                        # on bold alone within that block for the answer.
+                        bold_flags = [self._is_fully_bold(o_p) for _, o_p in option_entries]
+                        if bold_flags.count(True) == 1:
+                            bold_idx = bold_flags.index(True)
+                            for i, (o_text, _) in enumerate(option_entries):
+                                if i == bold_idx:
+                                    processed = self._process_highlighted_paragraph_text(o_text)
+                                    if processed != o_text:
+                                        bold_fallback_count += 1
+                                    extracted_lines.append(processed)
+                                else:
+                                    extracted_lines.append(o_text)
+                        else:
+                            for o_text, _ in option_entries:
+                                extracted_lines.append(o_text)
 
                 log.info(
                     f"DOCX tahlil qilindi: {p_count} ta paragraf topildi, "
-                    f"{highlight_count} ta variantda to'g'rilik belgisi aniqlandi, "
+                    f"{highlight_count} ta variantda rang/bo'yash orqali, "
+                    f"{bold_fallback_count} ta variantda nisbiy qalinlik orqali to'g'rilik belgisi aniqlandi, "
                     f"{numbering_count} ta savolga ro'yxat raqamlashi asosida '?' qo'yildi."
                 )
                 # Convert "1. Savol" → "? Savol" only when no explicit markers exist,
@@ -400,16 +473,15 @@ class DOCXExtractor(BaseExtractor):
                         for paragraph in cell.paragraphs:
                             yield paragraph
 
-    def _check_is_correct_option(self, paragraph, allow_bold_only: bool = True) -> bool:
+    def _check_is_correct_option(self, paragraph) -> bool:
         """
-        Scan all runs in the paragraph to detect highlighting, dominant
-        green/red text color, or (when *allow_bold_only* — the paragraph
-        isn't itself a numbered question) plain bold with no special color
-        at all.
+        Scan all runs in the paragraph for a STRONG correct-answer signal:
+        highlighting, or dominant green/red text color. Deliberately does
+        NOT look at bold here -- bold alone is ambiguous per-paragraph (see
+        _is_fully_bold and the block-level fallback in the Pass 2 loop,
+        which only trusts bold when nothing in the whole question carries
+        one of these strong signals).
         """
-        has_any_run_text = False
-        all_nonempty_bold = True
-        has_any_explicit_color = False
         for run in paragraph.runs:
             # 1. Highlight detection
             try:
@@ -423,7 +495,6 @@ class DOCXExtractor(BaseExtractor):
             # the correct option in green, others in red (often paired with
             # bold), against a neutral/blue color for the wrong options.
             if run.font.color and run.font.color.rgb:
-                has_any_explicit_color = True
                 try:
                     r, g, b = run.font.color.rgb
                     is_dominant_green = g > r + 40 and g > b + 40
@@ -433,30 +504,19 @@ class DOCXExtractor(BaseExtractor):
                 except Exception:
                     pass
 
+        return False
+
+    @staticmethod
+    def _is_fully_bold(paragraph) -> bool:
+        """True if the paragraph has text and every non-empty run is bold,
+        regardless of color."""
+        has_any_run_text = False
+        for run in paragraph.runs:
             if run.text.strip():
                 has_any_run_text = True
                 if not run.bold:
-                    all_nonempty_bold = False
-
-        # 3. Bold with no distinguishing color at all -- some test banks mark
-        # the correct option by making it plain bold (default/black text)
-        # against non-bold wrong options, rather than a color or highlight.
-        # Guarded by allow_bold_only since bold is also commonly used for
-        # ordinary emphasis inside a question's own text; the caller passes
-        # False for paragraphs already known to be a question (e.g. Word
-        # auto-numbered ones) to avoid corrupting them. Also requires NO
-        # explicit color on any run -- a wrong option that happens to carry
-        # its usual (non-red/green) color AND bold for unrelated emphasis
-        # must not be mistaken for this scheme.
-        if (
-            allow_bold_only
-            and has_any_run_text
-            and all_nonempty_bold
-            and not has_any_explicit_color
-        ):
-            return True
-
-        return False
+                    return False
+        return has_any_run_text
 
     @staticmethod
     def _has_list_numbering(paragraph) -> bool:
