@@ -28,7 +28,8 @@ def _make_docx(tmp_path):
     instead of a highlight box or explicit +/# marker. The question line
     itself carries no marker at all (just plain text ending in "?")."""
     doc = docx.Document()
-    doc.add_paragraph("Savol matni shu yerda?")
+    q = doc.add_paragraph("Savol matni shu yerda?")
+    _add_numpr(q)
     doc.add_paragraph("- Noto'g'ri variant 1")
     p_correct = doc.add_paragraph()
     run = p_correct.add_run("- To'g'ri variant")
@@ -103,7 +104,8 @@ def test_bold_with_no_color_marks_correct_option(tmp_path):
     (default/automatic black text, no explicit color) against non-bold
     wrong options -- no highlight, no red/green, just weight."""
     doc = docx.Document()
-    doc.add_paragraph("Savol matni?")
+    q = doc.add_paragraph("Savol matni?")
+    _add_numpr(q)
     doc.add_paragraph("- Noto'g'ri variant 1")
     p_correct = doc.add_paragraph()
     p_correct.add_run("- To'g'ri variant").bold = True
@@ -121,7 +123,8 @@ def test_bold_wrong_colored_option_not_mistaken_for_correct(tmp_path):
     ordinary (non-red/green) color -- bold used for unrelated emphasis,
     not as the correct-answer scheme -- must not be flagged correct."""
     doc = docx.Document()
-    doc.add_paragraph("Savol matni?")
+    q = doc.add_paragraph("Savol matni?")
+    _add_numpr(q)
     p_bold_wrong = doc.add_paragraph()
     run = p_bold_wrong.add_run("- Noto'g'ri, lekin bold")
     run.font.color.rgb = RGBColor(0x00, 0x20, 0x60)
@@ -142,13 +145,53 @@ def test_bold_wrong_colored_option_not_mistaken_for_correct(tmp_path):
     assert "- Noto'g'ri, lekin bold" in text
 
 
+def test_uniformly_colored_block_uses_relative_bold(tmp_path):
+    """Some questions color EVERY option the same non-red/green color
+    (e.g. the document's usual dark blue) with no highlight or red/green
+    anywhere in that question -- the correct one is distinguished purely
+    by being the one bold option among its identically-colored siblings.
+    Must not be confused with an ordinary question elsewhere in the same
+    document that DOES use red to mark its answer (the two questions'
+    signals must be judged independently, block by block)."""
+    doc = docx.Document()
+
+    q1 = doc.add_paragraph()
+    q1.add_run("Birinchi savol?").font.color.rgb = RGBColor(0x00, 0x20, 0x60)
+    _add_numpr(q1)
+    for opt_text, bold in [("- A", False), ("- B", True), ("- C", False), ("- D", False)]:
+        p = doc.add_paragraph()
+        run = p.add_run(opt_text)
+        run.font.color.rgb = RGBColor(0x00, 0x20, 0x60)
+        run.bold = bold
+
+    q2 = doc.add_paragraph("Ikkinchi savol?")
+    _add_numpr(q2)
+    doc.add_paragraph("- wrong1")
+    p_correct = doc.add_paragraph()
+    run2 = p_correct.add_run("- correct-red")
+    run2.font.color.rgb = RGBColor(0xFF, 0x00, 0x00)
+    run2.bold = True
+    doc.add_paragraph("- wrong2")
+
+    path = tmp_path / "uniform_blue_block.docx"
+    doc.save(str(path))
+
+    result = DOCXExtractor().extract(path)
+    text = result.full_text
+    assert "+ B" in text
+    assert "+ correct-red" in text
+    # exactly one "+" per question -- no cross-contamination between blocks
+    assert text.count("+ ") == 2
+
+
 def test_hyperlink_wrapped_option_text_is_not_lost(tmp_path):
     """Word auto-links bare email addresses and URLs, nesting their run(s)
     one level deeper inside a <w:hyperlink> wrapper. Text extraction must
     still recover that text -- losing it is disastrous when the linked
     text is the correct answer itself (silently produces an empty option)."""
     doc = docx.Document()
-    doc.add_paragraph("Savol matni?")
+    q = doc.add_paragraph("Savol matni?")
+    _add_numpr(q)
     doc.add_paragraph("- Oddiy variant")
 
     p_correct = doc.add_paragraph()
