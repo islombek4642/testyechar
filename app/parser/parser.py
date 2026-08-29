@@ -248,8 +248,15 @@ class QuestionParser:
                 result.append(line)
                 continue
 
-            parts = cls._EMBEDDED_OPT_RE.split(stripped)
-            result.extend(p.strip() for p in parts if p.strip())
+            parts = [p.strip() for p in cls._EMBEDDED_OPT_RE.split(stripped) if p.strip()]
+            # A line's own leading marker ("+"/"="/"?") is never itself a
+            # glued-on second item -- if the split severed the marker from
+            # its own content (content that happens to start with something
+            # letter-option-shaped, e.g. "+ C) a-1, b-3"), reattach it rather
+            # than emitting a bare-marker line with an empty option.
+            if len(parts) > 1 and parts[0] in ("+", "=", "?", "-"):
+                parts = [parts[0] + " " + parts[1]] + parts[2:]
+            result.extend(parts)
 
         return result
 
