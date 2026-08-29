@@ -123,3 +123,29 @@ def test_classic_parser_merges_numbered_sublist_option_continuations():
     q2 = questions[1]
     assert len(q2.options) == 4
     assert q2.options[0].text == "Eshitish va sezish"
+
+
+def test_marker_not_severed_from_content_that_looks_like_a_lettered_option():
+    """A correct option whose own text happens to start with a lettered
+    reference ("+ C) a-1, b-3", a "match the pairs" answer key) must not be
+    split into a bare "+" (an empty, wrongly-"correct" option) and a
+    separate unmarked "C) a-1, b-3" line -- which silently drops both the
+    correct flag and the "C)" label. The marker and its content belong to
+    ONE line; only genuinely glued-together items (two options on one row)
+    should ever be split apart."""
+    text = (
+        "? O'zbekiston Respublikasi Konstitutsiyaning XX bobi va XV bobi "
+        "qaysi bo'limlarga kiradi?\n"
+        "- A) a-1, b-2\n"
+        "- B) a-2, b-1\n"
+        "+ C) a-1, b-3\n"
+        "- D) a-3, b-1\n"
+    )
+    questions = QuestionParser().parse(text)
+
+    assert len(questions) == 1
+    q = questions[0]
+    assert len(q.options) == 4
+    assert q.options[2].text == "C) a-1, b-3"
+    assert q.options[2].is_correct is True
+    assert [o.is_correct for o in q.options] == [False, False, True, False]

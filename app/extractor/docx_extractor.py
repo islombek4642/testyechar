@@ -666,14 +666,19 @@ class DOCXExtractor(BaseExtractor):
     # parenthetical label (e.g. "Ikkinchi(a) va uchinchi(b) ...", referring to
     # sub-parts named a/b), not the start of a new option; a real option
     # marker is never itself wrapped in its own opening paren.
+    # Also exclude a preceding "-"/"–" (hyphen/en-dash): that's the Classic
+    # wrong-answer marker itself, not the end of a preceding option's text --
+    # "- A) a-1, b-2" is ONE option whose own content happens to read like a
+    # matching-pairs answer, not "-" (an empty option) glued to a fresh "A)"
+    # option that needs splitting off.
     _INLINE_OPT_UPPER = re.compile(
-        r'(?<=[^\s#*+=\nA-Z\d(])'  # preceded by lowercase letter or punctuation (not uppercase/digit/open-paren)
+        r'(?<=[^\s#*+=\-–\nA-Z\d(])'  # preceded by lowercase letter or punctuation (not uppercase/digit/open-paren/dash)
         r'(\s*)'
         r'([#*+=]?[A-D]\))',      # uppercase A-D option marker
         re.UNICODE,
     )
     _INLINE_OPT_LOWER = re.compile(
-        r'(?<=[^\s#*+=\na-zA-Z\d(])'  # preceded by punctuation only (not open-paren)
+        r'(?<=[^\s#*+=\-–\na-zA-Z\d(])'  # preceded by punctuation only (not open-paren/dash)
         r'(\s*)'
         r'([#*+=]?[a-d]\))',          # lowercase a-d option marker
         re.UNICODE,

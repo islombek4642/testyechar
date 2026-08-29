@@ -220,3 +220,32 @@ def test_hyperlink_wrapped_option_text_is_not_lost(tmp_path):
     text = result.full_text
     assert "dassa@umail.uz" in text
     assert "+ dassa@umail.uz" in text
+
+
+def test_dash_marked_matching_pairs_option_not_split_by_inline_marker_regex(tmp_path):
+    """A "-"-marked option whose own text reads like a matching-pairs answer
+    key ("- A) a-1, b-2") must stay on ONE line -- the inline-marker splitter
+    (meant to break up genuinely glued-together options like "A) x B) y" on
+    a single row) must not mistake the "-" marker for punctuation ending a
+    preceding clause and sever it from the "A)" that belongs to the SAME
+    option."""
+    doc = docx.Document()
+    doc.add_paragraph("Savol matni?")
+    doc.add_paragraph("- A) a-1, b-2")
+    doc.add_paragraph("- B) a-2, b-1")
+    doc.add_paragraph("+ C) a-1, b-3")
+    doc.add_paragraph("- D) a-3, b-1")
+
+    save_path = tmp_path / "matching_pairs.docx"
+    doc.save(str(save_path))
+
+    result = DOCXExtractor().extract(save_path)
+    text = result.full_text
+
+    assert "- A) a-1, b-2" in text
+    assert "- B) a-2, b-1" in text
+    assert "+ C) a-1, b-3" in text
+    assert "- D) a-3, b-1" in text
+    # Must NOT be split into a bare "-" line plus a separate "A) ..." line.
+    lines = [l for l in text.split("\n") if l.strip() == "-"]
+    assert lines == []
