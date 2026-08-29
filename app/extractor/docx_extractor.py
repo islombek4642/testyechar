@@ -204,18 +204,31 @@ class DOCXExtractor(BaseExtractor):
             else:
                 # --- Pass 2: no explicit markers → use highlighting ---
                 highlight_count = 0
+                numbering_count = 0
                 for p_text, p in paragraphs:
+                    stripped_p_text = p_text.strip()
                     if self._check_is_correct_option(p):
                         processed = self._process_highlighted_paragraph_text(p_text)
                         if processed != p_text:
                             highlight_count += 1
                         extracted_lines.append(processed)
+                    elif (
+                        stripped_p_text
+                        and stripped_p_text[0] not in "?=+#-–"
+                        and self._has_list_numbering(p)
+                    ):
+                        # Word auto-numbered ("1.", "2." ...) question --
+                        # the number is list metadata, not run text, so it's
+                        # otherwise indistinguishable from ordinary prose.
+                        extracted_lines.append("? " + stripped_p_text)
+                        numbering_count += 1
                     else:
                         extracted_lines.append(p_text)
 
                 log.info(
                     f"DOCX tahlil qilindi: {p_count} ta paragraf topildi, "
-                    f"{highlight_count} ta variantda to'g'rilik belgisi aniqlandi."
+                    f"{highlight_count} ta variantda to'g'rilik belgisi aniqlandi, "
+                    f"{numbering_count} ta savolga ro'yxat raqamlashi asosida '?' qo'yildi."
                 )
                 # Convert "1. Savol" → "? Savol" only when no explicit markers exist,
                 # because ABCParser needs numbered questions intact for format detection.
@@ -390,6 +403,22 @@ class DOCXExtractor(BaseExtractor):
 
         return False
 
+    @staticmethod
+    def _has_list_numbering(paragraph) -> bool:
+        """
+        True if the paragraph is part of a Word auto-numbered list (numPr).
+
+        Word renders the "1.", "2." etc. visually from list-numbering
+        metadata, not as literal characters in the run text -- python-docx
+        extracts such a question as plain text with no leading digit at
+        all. Checking numPr directly is the reliable structural signal for
+        "this paragraph is a question" in documents laid out this way,
+        rather than inferring it from what text happens to follow.
+        """
+        from docx.oxml.ns import qn
+
+        pPr = paragraph._p.find(qn("w:pPr"))
+        return pPr is not None and pPr.find(qn("w:numPr")) is not None
 
     _NUMBERED_Q = re.compile(
         r"^\d+[\.\)]\s+(.+)$"              # group 1: "1. Q"  "1) Q"
@@ -429,24 +458,26 @@ class DOCXExtractor(BaseExtractor):
         Give a "?" marker to a question line that has neither a number nor
         any marker of its own -- it's just plain text (often itself ending
         in "?", but that's punctuation, not a leading marker) -- when the
-        next non-blank line is a "-" (dash) option. That's the one
-        structural signal that survives extraction for this format: a
-        question is always immediately followed by its first "-" option.
+        next non-blank line is a "-"/"–" (hyphen or en-dash) option. That's
+        the one structural signal that survives extraction for this format:
+        a question is always immediately followed by its first option.
+        Covers documents whose questions have no Word list numbering
+        either (see _has_list_numbering, which handles the numbered case).
         """
         result = list(lines)
         n = len(result)
         for i, line in enumerate(result):
             stripped = line.strip()
-            if not stripped or stripped[0] in "?=+#-":
+            if not stripped or stripped[0] in "?=+#-–":
                 continue
             j = i + 1
             while j < n and not result[j].strip():
                 j += 1
             # The next option may already have been converted to "+text"
             # (correct-marker, dash stripped) by the highlighting pass
-            # above, rather than a bare "-", if it's the very first (and
-            # correct) option.
-            if j < n and result[j].strip().startswith(("-", "+")):
+            # above, rather than a bare "-"/"–", if it's the very first
+            # (and correct) option.
+            if j < n and result[j].strip().startswith(("-", "–", "+")):
                 result[i] = "? " + stripped
         return result
 
@@ -575,8 +606,8 @@ class DOCXExtractor(BaseExtractor):
         if not stripped:
             return p_text
 
-        # 1. Classic format option starting with '=' or '-'
-        if stripped.startswith("=") or stripped.startswith("-"):
+        # 1. Classic format option starting with '=', '-' or '–' (en-dash)
+        if stripped[0] in "=-–":
             leading_spaces = len(p_text) - len(p_text.lstrip())
             content = p_text[leading_spaces + 1:]
             return p_text[:leading_spaces] + "+" + content
