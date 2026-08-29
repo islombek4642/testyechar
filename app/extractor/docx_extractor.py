@@ -220,6 +220,15 @@ class DOCXExtractor(BaseExtractor):
                 # Convert "1. Savol" → "? Savol" only when no explicit markers exist,
                 # because ABCParser needs numbered questions intact for format detection.
                 extracted_lines = self._mark_numbered_questions(extracted_lines)
+                # Some documents number neither the question nor mark it any
+                # other way -- the question paragraph is just plain text
+                # (often itself ending in "?", but with no marker at the
+                # START of the line) immediately followed by its "-"
+                # (dash-prefixed) options. Without a "?" prefix, ClassicParser
+                # can't tell the question apart from ordinary unrecognized
+                # text and silently drops it, leaving its first option to
+                # open a bogus question with empty text.
+                extracted_lines = self._mark_unmarked_dash_questions(extracted_lines)
 
         except Exception as exc:
             log.error(f"Error during DOCX extraction loop: {exc}", exc_info=True)
@@ -355,7 +364,7 @@ class DOCXExtractor(BaseExtractor):
 
     def _check_is_correct_option(self, paragraph) -> bool:
         """
-        Scan all runs in the paragraph to detect highlighting or green text color.
+        Scan all runs in the paragraph to detect highlighting or green/red text color.
         """
         for run in paragraph.runs:
             # 1. Highlight detection
@@ -366,12 +375,15 @@ class DOCXExtractor(BaseExtractor):
                 # python-docx throws ValueError for unknown highlight values (e.g. "none")
                 pass
 
-            # 2. Dominant green text detection
+            # 2. Dominant green or red text detection -- some test banks mark
+            # the correct option in green, others in red (often paired with
+            # bold), against a neutral/blue color for the wrong options.
             if run.font.color and run.font.color.rgb:
                 try:
                     r, g, b = run.font.color.rgb
-                    # Green channel dominant (dominant green detection)
-                    if g > r + 40 and g > b + 40:
+                    is_dominant_green = g > r + 40 and g > b + 40
+                    is_dominant_red = r > g + 40 and r > b + 40
+                    if is_dominant_green or is_dominant_red:
                         return True
                 except Exception:
                     pass
@@ -410,6 +422,32 @@ class DOCXExtractor(BaseExtractor):
                     q_text = next((g for g in m.groups() if g is not None), "")
                     line = "? " + q_text
             result.append(line)
+        return result
+
+    def _mark_unmarked_dash_questions(self, lines: list[str]) -> list[str]:
+        """
+        Give a "?" marker to a question line that has neither a number nor
+        any marker of its own -- it's just plain text (often itself ending
+        in "?", but that's punctuation, not a leading marker) -- when the
+        next non-blank line is a "-" (dash) option. That's the one
+        structural signal that survives extraction for this format: a
+        question is always immediately followed by its first "-" option.
+        """
+        result = list(lines)
+        n = len(result)
+        for i, line in enumerate(result):
+            stripped = line.strip()
+            if not stripped or stripped[0] in "?=+#-":
+                continue
+            j = i + 1
+            while j < n and not result[j].strip():
+                j += 1
+            # The next option may already have been converted to "+text"
+            # (correct-marker, dash stripped) by the highlighting pass
+            # above, rather than a bare "-", if it's the very first (and
+            # correct) option.
+            if j < n and result[j].strip().startswith(("-", "+")):
+                result[i] = "? " + stripped
         return result
 
     # An ABC option's first item: "a)" / "#a)" / "A." — used to locate where a
@@ -537,8 +575,8 @@ class DOCXExtractor(BaseExtractor):
         if not stripped:
             return p_text
 
-        # 1. Classic format option starting with '='
-        if stripped.startswith("="):
+        # 1. Classic format option starting with '=' or '-'
+        if stripped.startswith("=") or stripped.startswith("-"):
             leading_spaces = len(p_text) - len(p_text.lstrip())
             content = p_text[leading_spaces + 1:]
             return p_text[:leading_spaces] + "+" + content
