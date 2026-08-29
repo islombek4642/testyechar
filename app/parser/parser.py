@@ -124,7 +124,13 @@ class QuestionParser:
         lines = text.splitlines()
 
         q_count = sum(1 for ln in lines if ln.strip().startswith("?"))
-        opt_count = sum(1 for ln in lines if ln.strip().startswith(("=", "+", "*")))
+        # "-" counts too: ClassicParser already treats it as an equivalent
+        # wrong-answer marker to "=". Without it, a dash-marked document
+        # (options always start with "-", question with "?") looks
+        # marker-less by this count and gets its already-correct "-"/"+"
+        # option lines double-prefixed with "=" here, corrupting them
+        # ("- text" -> "= - text").
+        opt_count = sum(1 for ln in lines if ln.strip().startswith(("=", "+", "*", "-")))
 
         if q_count < 3:
             return None
@@ -192,11 +198,16 @@ class QuestionParser:
     # initial+surname references ("Б. Васильев", "А. Пушкин") are common
     # prose in Russian question text — extending this to Cyrillic would
     # split a question's own text apart at every such name.
+    #
+    # The "+" branch also excludes a preceding modifier-key name (Ctrl,
+    # Shift, Alt, Win, Cmd) -- "Ctrl + X" / "Alt + Backspace" style keyboard-
+    # shortcut notation is common in computer-literacy question text and
+    # options, and is not a second option glued onto the first.
     _EMBEDDED_OPT_RE = re.compile(
         r'(?<=\S)\s+(?=[A-Fa-f][\.\)]\s)'
-        r'|(?<=\S)\s+(?=\+\s(?!\d))'
+        r'|(?<!Ctrl)(?<!Shift)(?<!Alt)(?<!Win)(?<!Cmd)(?<=\S)\s+(?=\+\s(?!\d))'
         r'|(?<=[.!?])\s+(?==\s(?!\d))',
-        re.UNICODE,
+        re.UNICODE | re.IGNORECASE,
     )
     # Recognises lines that already start with an option, a numbered question,
     # or a Classic-format marker (?/=/+). No required space after "="/"+"/"?" --

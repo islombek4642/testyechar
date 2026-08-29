@@ -40,6 +40,27 @@ def test_split_merged_option_lines_ignores_cyrillic_name_initials():
     assert len(questions[0].options) == 3
 
 
+def test_split_merged_option_lines_ignores_keyboard_shortcut_plus():
+    """"Ctrl + S" style keyboard-shortcut notation (a modifier key name
+    directly before " + ") must NOT be mistaken for a second option glued
+    onto the first -- common in computer-literacy question text/options."""
+    text = (
+        "? Ekranda ochiq bo'lgan dokumentni saqlash qanday amalga oshiriladi?\n"
+        "= Ctrl + X, yoki Shift +Delete\n"
+        "+ Ctrl + S, yoki Shift+F12, yoki Alt+Shift+F2\n"
+        "= Ctrl + P, yoki Ctrl+Shift+F12\n"
+        "= Ctrl + Z, yoki Alt + Backspace\n"
+    )
+    questions = QuestionParser().parse(text)
+
+    assert len(questions) == 1
+    q = questions[0]
+    assert len(q.options) == 4
+    correct = [i for i, o in enumerate(q.options) if o.is_correct]
+    assert correct == [1]
+    assert q.options[1].text == "Ctrl + S, yoki Shift+F12, yoki Alt+Shift+F2"
+
+
 def test_split_merged_option_lines_ignores_notation_equals_signs():
     """"=" used as plain notation inside a question ("asos = so'z yasovchi
     = ...") must NOT be chopped into fake options -- only "=" that follows

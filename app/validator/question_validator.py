@@ -129,23 +129,26 @@ class QuestionValidator:
             )
 
         # ── Check options ───────────────────────────────────────────────
-        options_text = [o.text.strip() for o in raw.options]
-        non_empty = [t for t in options_text if t]
+        # Keep each option's text paired with its own RawOption throughout —
+        # filtering the text list and zipping it against the unfiltered
+        # raw.options list (as this used to do) misaligns text with
+        # is_correct as soon as any option but the last is empty, silently
+        # attributing the correct-answer flag to the wrong option.
+        non_empty_pairs = [(o.text.strip(), o) for o in raw.options if o.text.strip()]
+        empty_count = len(raw.options) - len(non_empty_pairs)
 
-        if len(non_empty) < settings.min_options:
+        if len(non_empty_pairs) < settings.min_options:
             errors.append(
                 f"{prefix}: Kamida {settings.min_options} ta variant kerak "
-                f"(topildi: {len(non_empty)})."
+                f"(topildi: {len(non_empty_pairs)})."
             )
-        elif len(non_empty) > settings.max_options:
+        elif len(non_empty_pairs) > settings.max_options:
             warnings.append(
-                f"{prefix}: {len(non_empty)} ta variant topildi "
+                f"{prefix}: {len(non_empty_pairs)} ta variant topildi "
                 f"(max {settings.max_options}). Ortiqchalari olib tashlanadi."
             )
-            non_empty = non_empty[: settings.max_options]
+            non_empty_pairs = non_empty_pairs[: settings.max_options]
 
-        # Check for empty options
-        empty_count = len(options_text) - len(non_empty)
         if empty_count > 0:
             warnings.append(
                 f"{prefix}: {empty_count} ta bo'sh variant olib tashlandi."
@@ -165,7 +168,7 @@ class QuestionValidator:
         seen: dict[str, int] = {}
         unique_options: list[str] = []
         unique_correct: list[bool] = []
-        for opt, raw_opt in zip(non_empty, raw.options):
+        for opt, raw_opt in non_empty_pairs:
             if opt in seen:
                 warnings.append(
                     f"{prefix}: Takroriy variant olib tashlandi: «{opt}»"

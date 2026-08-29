@@ -43,3 +43,31 @@ def test_duplicate_option_keeps_correct_flag_from_later_occurrence():
     q = results[0].question
     assert q.o == ["Добраться", "Дойти"]
     assert q.c == 0
+
+
+def test_stray_empty_option_not_at_end_does_not_misattribute_correct_flag():
+    """A RawQuestion with an empty-text option BEFORE the correct one must
+    not have its correct-answer flag land on the wrong option. Filtering
+    empty option TEXT first and then zip()-ing the filtered text list
+    against the unfiltered RawOption list misaligns every option from the
+    empty one onward -- the correct flag silently lands on the option
+    physically after it (here, "d" would wrongly read as correct, and "c"
+    would lose its flag) instead of staying on "c"."""
+    raw = RawQuestion(
+        question_text="Savol matni?",
+        options=[
+            RawOption(text="a", is_correct=False),
+            RawOption(text="b", is_correct=False),
+            RawOption(text="", is_correct=False),  # stray empty option
+            RawOption(text="c", is_correct=True),
+            RawOption(text="d", is_correct=False),
+        ],
+        line_start=1,
+    )
+    results = QuestionValidator().validate_all([raw])
+
+    assert results[0].is_valid
+    q = results[0].question
+    assert q.o == ["a", "b", "c", "d"]
+    assert q.c == 2
+    assert q.o[q.c] == "c"
