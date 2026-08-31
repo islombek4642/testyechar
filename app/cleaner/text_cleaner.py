@@ -124,6 +124,7 @@ class TextCleaner:
 
         text = cls.normalize_unicode(text)
         text = cls.normalize_quotes(text)
+        text = cls.mark_unmarked_correct_options(text)
         text = cls.normalize_dashes(text)
         text = cls.normalize_whitespace(text)
         text = cls.strip_arabic_diacritics_before_markers(text)
@@ -156,6 +157,113 @@ class TextCleaner:
         for fancy, plain in _QUOTE_MAP.items():
             text = text.replace(fancy, plain)
         return text
+
+    # A line ending in "?" always completes the question's own interrogative
+    # sentence -- an answer is never itself phrased as a question. "." is
+    # ambiguous (some question stems end with an imperative "...to'g'ri
+    # javobni aniqlang." instead of "?", but a genuine answer can just as
+    # well be a complete declarative sentence) -- see the is_last handling
+    # in mark_unmarked_correct_options for how that ambiguity is resolved.
+    _TRAILING_QMARK = re.compile(r'[?？]\s*$', re.UNICODE)
+    _TRAILING_TERM_PUNCT = re.compile(r'[?？.]\s*$', re.UNICODE)
+
+    @classmethod
+    def mark_unmarked_correct_options(cls, text: str) -> str:
+        """
+        Handle PDFs where every WRONG option carries an explicit "="/"-"
+        marker but the CORRECT option carries no marker at all -- some test
+        banks build their answer key this way. The bare line can appear
+        anywhere among a question's options, including before the first
+        "=" (not only after), so a plain "does this line have a marker"
+        scan is not enough: a question stem that itself wraps onto a second
+        PDF line (ending in "?") must still be recognized as
+        question-continuation, not mistaken for the bare correct answer.
+
+        Must run BEFORE fix_broken_line_joins: that step rejoins an
+        unmarked line onto the previous option as a wrapped-word
+        continuation whenever both ends look like lowercase text, which is
+        exactly what an unmarked correct answer looks like here too --
+        marking it "+" first makes it a recognized test marker so the
+        join step correctly leaves it alone.
+
+        Trigger is a whole-document signal, deliberately strict: "="/"-"
+        markers already appear on (at least) every option (>= 1 per
+        question) AND no "+"/"*"/"#" correct-marker appears ANYWHERE in the
+        text. If correct answers were marked at all, this format doesn't
+        apply -- leave the text untouched.
+        """
+        lines = text.splitlines()
+
+        q_count = sum(1 for ln in lines if ln.strip().startswith("?"))
+        eq_count = sum(1 for ln in lines if ln.strip().startswith(("=", "-")))
+        plus_count = sum(1 for ln in lines if ln.strip().startswith(("+", "*", "#")))
+
+        if q_count < 3 or plus_count > 0 or eq_count < q_count:
+            return text
+
+        q_idxs = [i for i, ln in enumerate(lines) if ln.strip().startswith("?")]
+
+        is_correct_line = [False] * len(lines)
+        for pos, qi in enumerate(q_idxs):
+            block_end = q_idxs[pos + 1] if pos + 1 < len(q_idxs) else len(lines)
+            content = [i for i in range(qi + 1, block_end) if lines[i].strip()]
+            marker_ks = [
+                k for k, i in enumerate(content)
+                if lines[i].strip().startswith(("=", "-"))
+            ]
+            if not marker_ks:
+                continue  # no options recognized in this block -- leave untouched
+
+            first_marker_k = marker_ks[0]
+            pre = content[:first_marker_k]
+
+            # Whether the question's own sentence is already grammatically
+            # complete -- if so, ANY unmarked line before the first "=" is a
+            # correct-answer candidate, not a wrapped continuation.
+            stem_complete = bool(cls._TRAILING_TERM_PUNCT.search(lines[qi].strip()))
+            for idx, i in enumerate(pre):
+                if stem_complete:
+                    is_correct_line[i] = True
+                    continue
+                stripped = lines[i].strip()
+                if cls._TRAILING_QMARK.search(stripped):
+                    # Unambiguous: only the question's own sentence is ever
+                    # phrased as a question -- an answer never ends in "?".
+                    stem_complete = True
+                    continue
+                is_last = idx == len(pre) - 1
+                if is_last:
+                    # Nothing else remains before the options begin -- this
+                    # IS the correct answer, whether or not it happens to
+                    # end in "." (a genuine answer sentence, not a
+                    # continuation-completing full stop).
+                    is_correct_line[i] = True
+                    continue
+                # Not the last pre-marker line and the stem is still
+                # incomplete: only treat a trailing "." as completing the
+                # sentence (and fold it as continuation) if it is NOT the
+                # answer itself -- i.e. there is at least one more unmarked
+                # line after it still to come.
+                if cls._TRAILING_TERM_PUNCT.search(stripped):
+                    stem_complete = True
+                # else: still incomplete, keep folding as continuation.
+
+            for i in content[first_marker_k + 1:]:
+                if not lines[i].strip().startswith(("=", "-")):
+                    is_correct_line[i] = True
+
+        if not any(is_correct_line):
+            return text
+
+        result = [
+            ("+ " + line.strip()) if is_correct_line[i] else line
+            for i, line in enumerate(lines)
+        ]
+
+        log.info(
+            f"Belgisiz to'g'ri javob formati aniqlandi: {q_count} ta savol uchun + belgisi qo'shildi."
+        )
+        return "\n".join(result)
 
     @staticmethod
     def normalize_dashes(text: str) -> str:
