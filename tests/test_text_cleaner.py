@@ -135,3 +135,38 @@ def test_mark_unmarked_correct_options_does_not_activate_when_already_marked():
     )
     result = TextCleaner.mark_unmarked_correct_options(text)
     assert result == text
+
+
+def test_mark_unmarked_correct_options_skips_document_with_no_real_answer_key():
+    """Some PDFs mark EVERY option (right and wrong alike) with "=" and
+    carry no answer key at all -- a fill-in-the-blank question stem that
+    wraps onto its own PDF line looks, line-shape wise, exactly like this
+    format's bare correct answer (e.g. "..........intro text" / "the rest
+    of the sentence."). Every question in such a document already has its
+    full complement of 4 "="-marked options, so nothing is missing --
+    the whole-document "=" count must gate this off entirely, or the
+    continuation line gets fabricated into a confidently "correct" option
+    with zero real basis (worse than leaving it unanswered)."""
+    text = (
+        "??..........intro fragment one\n"
+        "the rest of question one sentence.\n"
+        "= Person A\n"
+        "= Person B\n"
+        "= Person C\n"
+        "= Person D\n"
+        "??..........intro fragment two\n"
+        "the rest of question two sentence.\n"
+        "= Person E\n"
+        "= Person F\n"
+        "= Person G\n"
+        "= Person H\n"
+        "??..........intro fragment three\n"
+        "the rest of question three sentence.\n"
+        "= Person I\n"
+        "= Person J\n"
+        "= Person K\n"
+        "= Person L\n"
+    )
+    result = TextCleaner.mark_unmarked_correct_options(text)
+    assert result == text
+    assert "+ " not in result
