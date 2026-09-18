@@ -191,6 +191,22 @@ class TextCleaner:
         question) AND no "+"/"*"/"#" correct-marker appears ANYWHERE in the
         text. If correct answers were marked at all, this format doesn't
         apply -- leave the text untouched.
+
+        A second, equally important guard: some PDFs mark EVERY option
+        (right and wrong alike) with "=" and carry no answer key at all --
+        a fill-in-the-blank question stem that wraps onto its own PDF line
+        (e.g. "..........eshituvchilar dunyosi ... natijasida" / "karlarni
+        ijtimoiy tajribali egallashi ... murakkabdir.") looks, line-shape
+        wise, exactly like this format's bare correct answer. Without a
+        guard, that continuation line gets fabricated into a confidently
+        "correct" option with zero real basis -- worse than leaving the
+        question unanswered, since a human reviewer trusts a marked
+        answer. The tell: in a genuine "correct option unmarked" document,
+        most questions have FEWER than 4 "="-marked options (one slot is
+        deliberately left for the bare correct line); if the document's
+        most common "=" count per question is already 4 or more, every
+        question already has its full complement of marked options and
+        nothing is missing -- skip the whole document.
         """
         lines = text.splitlines()
 
@@ -202,6 +218,18 @@ class TextCleaner:
             return text
 
         q_idxs = [i for i, ln in enumerate(lines) if ln.strip().startswith("?")]
+
+        marked_counts: list[int] = []
+        for pos, qi in enumerate(q_idxs):
+            block_end = q_idxs[pos + 1] if pos + 1 < len(q_idxs) else len(lines)
+            n = sum(
+                1 for i in range(qi + 1, block_end)
+                if lines[i].strip().startswith(("=", "-"))
+            )
+            if n:
+                marked_counts.append(n)
+        if marked_counts and max(set(marked_counts), key=marked_counts.count) >= 4:
+            return text
 
         is_correct_line = [False] * len(lines)
         for pos, qi in enumerate(q_idxs):
